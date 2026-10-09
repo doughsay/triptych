@@ -1,0 +1,24 @@
+/* Region outlines, shown while dragging a window. */
+.triptych-region {
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+}
+
+/* Where the dragged window will land. */
+.triptych-preview {
+  background-color: rgba(53, 132, 228, 0.3);
+  border: 2px solid rgba(53, 132, 228, 0.8);
+  border-radius: 12px;
+}
+
+/* The drop would make a pane smaller than MIN_SIZE, so it's refused. */
+.triptych-preview.refused {
+  background-color: rgba(224, 27, 36, 0.3);
+  border-color: rgba(224, 27, 36, 0.8);
+}
+
+/* Dropping here swaps the two windows. */
+.triptych-preview.swap {
+  background-color: rgba(46, 194, 126, 0.3);
+  border-color: rgba(46, 194, 126, 0.8);
+}

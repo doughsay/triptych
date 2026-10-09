@@ -1,0 +1,9 @@
+{
+  "uuid": "triptych@doughsay.github.io",
+  "name": "Triptych",
+  "description": "Split a wide monitor into regions (left, center, right). Each region tiles its own windows and can be left empty.",
+  "shell-version": ["51"],
+  "session-modes": ["user", "unlock-dialog"],
+  "settings-schema": "org.gnome.shell.extensions.triptych",
+  "url": "https://github.com/doughsay/triptych"
+}
