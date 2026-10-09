@@ -38,14 +38,14 @@ or KDE.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
   the same files (and loads them at its next login).
-- Nested-session checks:
+- Checks (1–6 in nested, 7 in the real session):
   1. new-window placement: **passes** (after the snap-back and largest-pane changes)
   2. dragging into side regions vs Mutter's edge-tiling (Q8): **passes**
   3. drag overlay and drop, including the red preview for refused drops: **passes**
   4. edge-resizing splits and region boundaries: **passes**
   5. maximize filling the region: **passes**
   6. apps that resize themselves after first frame (Firefox, Electron): **passes**
-  7. lock and unlock leave the layout intact: real session, not confirmed yet
+  7. lock and unlock leave the layout intact: **passes** (real session)
 - Games: `FLOAT_CLASSES` only covers `steam*`. Games run through Wine's Wayland mode may report
   another WM class; add those to `FLOAT_CLASSES` (R9).
 
