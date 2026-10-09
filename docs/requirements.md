@@ -78,7 +78,9 @@ Keyboard shortcuts are a nice extra, not the primary interface.
     region.
 - **R8 Floating.** Floating windows keep normal GNOME behaviour.
   - Never tiled: dialogs, transient/modal windows, popups, splash screens, picture-in-picture,
-    fixed-size (non-resizable) windows, and the WM classes in `FLOAT_CLASSES`.
+    fixed-size (non-resizable) windows, the WM class prefixes in `FLOAT_CLASSES`, and apps marked
+    "Always Float <App>" in the window menu (a checkbox, stored in GSettings by WM class; unchecking
+    it tiles the app's windows again).
   - The window menu (right-click the title bar, or Alt+Space) has "Float Window" or "Tile
     Window". Float leaves the window where it is. Tile puts it in the region under its center,
     or uses placement (R10) if that region is floating. With no room it stays floating.
@@ -89,7 +91,7 @@ Keyboard shortcuts are a nice extra, not the primary interface.
     floated by hand), bottom of the stack first, as long as they fit.
   - **On/off toggle.** The Triptych toggle in Quick Settings turns tiling off (windows stay where
     they are) and back on (a fresh start: placement runs on every window). The on/off state
-    survives a logout; region modes and boundaries don't yet (R18).
+    survives a logout, and so do region widths and modes (R18).
 - **R9 Games are hands-off.** Fullscreen windows are never moved or resized, and games must not be
   grabbed and tiled on launch. The mechanism is still to be decided: a fullscreen check, a rule
   list, or both.
@@ -170,8 +172,9 @@ Keyboard shortcuts are a nice extra, not the primary interface.
 
 ## Persistence and robustness
 
-- **R18 Survives restarts.** Default widths and settings persist. Per-workspace boundary changes
-  persist at least for the session. After a shell restart, a log out and back in, or the extension
+- **R18 Survives restarts.** Default widths and settings persist. Each workspace's region widths
+  and tiled/floating modes are saved in GSettings by workspace number, and restored when its
+  layout is created (login, or tiling switched back on). Which window was where is not restored. After a shell restart, a log out and back in, or the extension
   being disabled and re-enabled, windows return to their regions where that's practical.
   Q5 covers persistence across logins with dynamic workspaces.
 - **R19 Fails safe.** If the extension throws or is disabled, windows stay where they are and
@@ -261,6 +264,11 @@ Keyboard shortcuts are a nice extra, not the primary interface.
 - **2026-10-09 Floating regions, window float toggle, swap, on/off toggle.** Region modes are switched in a Quick Settings submenu, single windows in the window menu.
   New windows only go to tiled regions. The on/off state is stored in GSettings
   (`tiling-enabled`). Workspaces were tested in nested and work, each with its own layout.
+
+- **2026-10-09 Always Float apps and layout persistence.** "Always Float <App>" in the window menu
+  keeps an app out of tiling for good. Region widths and modes persist per workspace number,
+  which is reliable with static workspaces; with dynamic ones, numbers shift when GNOME removes
+  an empty workspace.
 
 ## Open questions
 

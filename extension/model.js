@@ -339,6 +339,31 @@ export function resetRegionSizes(layout, sizes) {
     });
 }
 
+// What persists of a layout: region widths and tiled/floating modes (not
+// which windows were where).
+export function saveLayout(layout) {
+    return {
+        sizes: layout.regions.map(r => r.size),
+        floating: layout.regions.map(r => r.floating),
+    };
+}
+
+// Applies a saved state to a fresh layout. Ignored if it doesn't match the
+// region count (the config changed) or isn't well formed.
+export function restoreLayout(layout, saved) {
+    const n = layout.regions.length;
+    const ok = saved && Array.isArray(saved.sizes) && Array.isArray(saved.floating) &&
+        saved.sizes.length === n && saved.floating.length === n &&
+        saved.sizes.every(v => typeof v === 'number' && v > 0);
+    if (!ok)
+        return false;
+    layout.regions.forEach((r, i) => {
+        r.size = saved.sizes[i];
+        r.floating = !!saved.floating[i];
+    });
+    return true;
+}
+
 // Index of the region under `point` (gaps count toward the nearer region).
 export function regionAt(layout, area, gaps, point) {
     return regionIndexAt(regionRectsF(layout, area, gaps), gaps, point);

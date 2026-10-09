@@ -23,19 +23,21 @@ or KDE.
 
 ## Status (2026-10-09)
 
-- 38 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Nothing has run in
-  the real session yet.
+- 40 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
+  session since 2026-10-09: fullscreen HDR games stay untouched.
 - The GitHub repo is `doughsay/triptych`. The extension ID `triptych@doughsay.github.io` is final.
 - v1 feature set is done and verified in nested (2026-10-09): floating regions (Quick Settings
   submenu), Float/Tile in the window menu (floating windows have no drop zones), swap on center
   drop (green preview), Reset Region Sizes, the Quick Settings on/off toggle
   (`extension/indicator.js`, GSettings schema in `extension/schemas/`, compiled by
   `make install`), outlines under windows and the preview under the dragged window.
-- Next: the first real-session test.
-- Open: persistence of region sizes and modes across restarts (R18, Q5). With static workspaces,
-  saving by workspace index is safe. Dynamic workspaces are untested.
-- `make nested` symlinks the extension into `~/.local/share/gnome-shell/extensions/`. It isn't
-  enabled in the real session.
+- Since then: "Always Float <App>" in the window menu (GSettings `float-classes`) and per-workspace
+  persistence of region widths and modes (GSettings `workspace-layouts`, by workspace number).
+  Verified in nested; the real session picks them up at the next login.
+- Dynamic workspaces are untested, and shift the saved workspace numbers.
+- `make nested` (via `make install`) symlinks the extension into
+  `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
+  the same files (and loads them at its next login).
 - Nested-session checks:
   1. new-window placement: **passes** (after the snap-back and largest-pane changes)
   2. dragging into side regions vs Mutter's edge-tiling (Q8): **passes**
@@ -43,7 +45,7 @@ or KDE.
   4. edge-resizing splits and region boundaries: **passes**
   5. maximize filling the region: **passes**
   6. apps that resize themselves after first frame (Firefox, Electron): **passes**
-  7. lock and unlock leave the layout intact: real session only, not done
+  7. lock and unlock leave the layout intact: real session, not confirmed yet
 - Games: `FLOAT_CLASSES` only covers `steam*`. Games run through Wine's Wayland mode may report
   another WM class; add those to `FLOAT_CLASSES` (R9).
 

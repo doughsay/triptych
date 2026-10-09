@@ -38,7 +38,7 @@ export default class TriptychExtension extends Extension {
     _sync() {
         const on = this._settings.get_boolean('tiling-enabled');
         if (on && !this._tiler) {
-            this._tiler = new Tiler();
+            this._tiler = new Tiler(this._settings);
             this._tiler.enable();
         } else if (!on && this._tiler) {
             this._tiler.disable();

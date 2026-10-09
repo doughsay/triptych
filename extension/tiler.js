@@ -6,6 +6,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -41,7 +42,8 @@ const SlotConstraint = GObject.registerClass({
 });
 
 export class Tiler {
-    constructor() {
+    constructor(settings) {
+        this._settings = settings; // see schemas/: float-classes, workspace-layouts
         this._layouts = new Map(); // Meta.Workspace -> layout
         this._windows = new Map(); // Meta.Window -> {ws, ids}
         this._signals = []; // [object, handlerId]
@@ -61,6 +63,7 @@ export class Tiler {
         this._connect(display, 'workareas-changed', () => this._queueAll());
         this._connect(Main.layoutManager, 'monitors-changed', () => this._queueAll());
         this._connect(global.workspace_manager, 'workspace-removed', () => this._pruneLayouts());
+        this._connect(this._settings, 'changed::float-classes', () => this._resyncTracking());
 
         // "Float Window" / "Tile Window" in the window menu.
         const tiler = this;
@@ -119,7 +122,10 @@ export class Tiler {
         this._pending.set(actor, id);
     }
 
-    _isTileable(win) {
+    // `ignoreAppRules`: leave out the "Always Float" apps (for the menu, which
+    // must still offer to undo the rule).
+    _isTileable(win, ignoreAppRules = false) {
+        const wmClass = (win.get_wm_class() ?? '').toLowerCase();
         return win.get_window_type() === Meta.WindowType.NORMAL &&
             !win.get_transient_for() &&
             !win.is_attached_dialog() &&
@@ -129,7 +135,21 @@ export class Tiler {
             // allows_resize() is false while maximized, e.g. auto-maximized on open.
             (win.allows_resize() || win.get_maximize_flags() !== 0) &&
             win.get_monitor() === global.display.get_primary_monitor() &&
-            !FLOAT_CLASSES.some(c => (win.get_wm_class() ?? '').toLowerCase().startsWith(c));
+            !FLOAT_CLASSES.some(c => wmClass.startsWith(c)) &&
+            (ignoreAppRules || !this._settings.get_strv('float-classes').includes(wmClass));
+    }
+
+    // After the "Always Float" list changes: windows of a newly listed app float
+    // where they are; windows of an app taken off the list get placed.
+    _resyncTracking() {
+        for (const actor of global.get_window_actors()) {
+            const win = actor.meta_window;
+            const tracked = this._windows.has(win);
+            if (tracked && !this._isTileable(win))
+                this._untrack(win, true);
+            else if (!tracked && this._isTileable(win))
+                this._track(win);
+        }
     }
 
     _track(win) {
@@ -193,9 +213,29 @@ export class Tiler {
         let layout = this._layouts.get(ws);
         if (!layout) {
             layout = Model.createLayout(REGION_SIZES);
+            Model.restoreLayout(layout, this._savedLayouts()[ws.index()]);
             this._layouts.set(ws, layout);
         }
         return layout;
+    }
+
+    // Saved region widths and modes, by workspace number.
+    _savedLayouts() {
+        try {
+            const saved = JSON.parse(this._settings.get_string('workspace-layouts'));
+            return Array.isArray(saved) ? saved : [];
+        } catch {
+            return [];
+        }
+    }
+
+    // Saves every workspace layout of this session, keeping saved entries for
+    // workspaces not touched yet. Called after user changes, not on relayouts.
+    _saveLayouts() {
+        const saved = this._savedLayouts();
+        for (const [ws, layout] of this._layouts)
+            saved[ws.index()] = Model.saveLayout(layout);
+        this._settings.set_string('workspace-layouts', JSON.stringify(saved));
     }
 
     _pruneLayouts() {
@@ -266,6 +306,7 @@ export class Tiler {
             for (const w of global.display.sort_windows_by_stacking(floaters))
                 Model.insertInto(layout, w, i, area, GAPS, this._minSize);
         }
+        this._saveLayouts();
         this._queue(ws);
     }
 
@@ -273,6 +314,7 @@ export class Tiler {
     resetRegionSizes() {
         const ws = global.workspace_manager.get_active_workspace();
         Model.resetRegionSizes(this._layout(ws), REGION_SIZES);
+        this._saveLayouts();
         this._queue(ws);
     }
 
@@ -296,15 +338,29 @@ export class Tiler {
     }
 
     _addMenuItem(menu, win) {
-        const state = this._windows.get(win);
-        if (!state?.ws)
-            return; // unmanaged: dialogs, fixed-size windows, games
-        const tiled = !!Model.findWindow(this._layout(state.ws), win);
-        const item = new PopupMenu.PopupMenuItem(tiled ? 'Float Window' : 'Tile Window');
-        item.setOrnament(PopupMenu.Ornament.NONE);
-        item.connect('activate', () => this._toggleFloating(win));
+        if (!this._isTileable(win, true))
+            return; // never tiles anyway: dialogs, fixed-size windows, games
         // Before the separator and "Close" at the end.
-        menu.addMenuItem(item, Math.max(0, menu.numMenuItems - 2));
+        const add = item => menu.addMenuItem(item, Math.max(0, menu.numMenuItems - 2));
+        const state = this._windows.get(win);
+        if (state?.ws) {
+            const tiled = !!Model.findWindow(this._layout(state.ws), win);
+            const item = new PopupMenu.PopupMenuItem(tiled ? 'Float Window' : 'Tile Window');
+            item.setOrnament(PopupMenu.Ornament.NONE);
+            item.connect('activate', () => this._toggleFloating(win));
+            add(item);
+        }
+        const wmClass = (win.get_wm_class() ?? '').toLowerCase();
+        if (!wmClass)
+            return;
+        const classes = this._settings.get_strv('float-classes');
+        const always = classes.includes(wmClass);
+        const name = Shell.WindowTracker.get_default().get_window_app(win)?.get_name() ?? wmClass;
+        const item = new PopupMenu.PopupMenuItem(`Always Float ${name}`);
+        item.setOrnament(always ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+        item.connect('activate', () => this._settings.set_strv('float-classes', always
+            ? classes.filter(c => c !== wmClass) : [...classes, wmClass]));
+        add(item);
     }
 
     _center(win) {
@@ -433,6 +489,8 @@ export class Tiler {
                     grab.win, this._minSize, this._visible);
                 Model.moveWindow(layout, grab.win, target, area, GAPS);
             }
+        } else {
+            this._saveLayouts(); // region widths may have changed
         }
         // Let Mutter finish its own end-of-grab work before snapping into place.
         this._queue(grab.ws);

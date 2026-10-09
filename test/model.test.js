@@ -486,3 +486,27 @@ test('room for a drop is judged after the dragged window leaves its slot', () =>
     assert.equal(M.moveWindow(l, 'huge', t, AREA, GAPS), true);
     assert.deepEqual(rects(l).get('huge'), {x: 1000, y: 500, width: 2000, height: 500});
 });
+
+test('saveLayout and restoreLayout round-trip widths and modes, not windows', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 800, y: 0, width: 2200, height: 1000}, MIN);
+    M.setRegionFloating(l, 2, true);
+    const saved = JSON.parse(JSON.stringify(M.saveLayout(l)));
+    const fresh = layout();
+    assert.equal(M.restoreLayout(fresh, saved), true);
+    assert.deepEqual(M.computeLayout(fresh, AREA, GAPS).regions.map(r => r.width),
+        [800, 2200, 1000]);
+    assert.deepEqual(fresh.regions.map(r => r.floating), [false, false, true]);
+    assert.equal(fresh.regions[1].root, null);
+});
+
+test('restoreLayout ignores state that does not fit the layout', () => {
+    for (const bad of [null, {}, {sizes: [1, 2], floating: [false, false]},
+        {sizes: [1, 0, 1], floating: [false, false, false]},
+        {sizes: [1, 2, 1], floating: [false]}]) {
+        const l = layout();
+        assert.equal(M.restoreLayout(l, bad), false);
+        assert.deepEqual(M.saveLayout(l), {sizes: [1, 2, 1], floating: [false, false, false]});
+    }
+});
