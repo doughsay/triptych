@@ -14,7 +14,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {WindowMenu} from 'resource:///org/gnome/shell/ui/windowMenu.js';
 
 import * as Model from './model.js';
-import {FLOAT_CLASSES, GAPS, MIN_SIZE, REGION_SIZES} from './config.js';
+import {
+    FLOAT_CLASSES, FLOAT_TITLE_SECONDS, FLOAT_TITLES, GAPS, MIN_SIZE, REGION_SIZES,
+} from './config.js';
 
 // Direction bits of Meta.GrabOp resize values.
 const EDGE_BITS = [[0x1000, 'w'], [0x2000, 'e'], [0x4000, 's'], [0x8000, 'n']];
@@ -116,7 +118,7 @@ export class Tiler {
         const id = actor.connect('first-frame', () => {
             actor.disconnect(id);
             this._pending.delete(actor);
-            this._track(win);
+            this._track(win, true);
             this._onFocus();
         });
         this._pending.set(actor, id);
@@ -152,12 +154,17 @@ export class Tiler {
         }
     }
 
-    _track(win) {
-        if (this._windows.has(win) || !this._isTileable(win))
+    // `opened`: the window has just opened, so a title change can still float
+    // it for a few seconds (FLOAT_TITLES).
+    _track(win, opened = false) {
+        if (this._windows.has(win) || !this._isTileable(win) ||
+            Model.matchesTitleRule(win.get_wm_class(), win.get_title(), FLOAT_TITLES))
             return;
-        const state = {ws: null, ids: []};
+        const state = {ws: null, ids: [], openRect: win.get_frame_rect(),
+            titleUntil: opened ? GLib.get_monotonic_time() + FLOAT_TITLE_SECONDS * 1e6 : 0};
         this._windows.set(win, state);
         state.ids = [
+            win.connect('notify::title', () => this._onTitleChanged(win)),
             win.connect('unmanaging', () => this._untrack(win, true)),
             win.connect('workspace-changed', () => this._syncWorkspace(win)),
             win.connect('notify::minimized', () => this._queue(state.ws)),
@@ -189,6 +196,23 @@ export class Tiler {
             Model.removeWindow(this._layout(state.ws), win);
             this._queue(state.ws);
         }
+    }
+
+    // A window that gets a FLOAT_TITLES title just after opening floats, back
+    // at the size it opened with, centered where it was tiled but on screen.
+    _onTitleChanged(win) {
+        const state = this._windows.get(win);
+        if (GLib.get_monotonic_time() > state.titleUntil ||
+            !Model.matchesTitleRule(win.get_wm_class(), win.get_title(), FLOAT_TITLES))
+            return;
+        this._untrack(win, true);
+        const f = win.get_frame_rect(), a = win.get_work_area_current_monitor();
+        const {width, height} = state.openRect;
+        const clamp = (v, min, max) => Math.round(Math.max(min, Math.min(v, max)));
+        win.move_resize_frame(true,
+            clamp(f.x + (f.width - width) / 2, a.x, a.x + a.width - width),
+            clamp(f.y + (f.height - height) / 2, a.y, a.y + a.height - height),
+            width, height);
     }
 
     // Puts the window into its workspace's layout, running the placement

@@ -510,3 +510,14 @@ test('restoreLayout ignores state that does not fit the layout', () => {
         assert.deepEqual(M.saveLayout(l), {sizes: [1, 2, 1], floating: [false, false, false]});
     }
 });
+
+test('matchesTitleRule needs both the class and the title prefix', () => {
+    const rules = [{wmClass: 'firefox', title: 'Extension: ('}];
+    const popup = 'Extension: (Some Extension) - Unlock — Mozilla Firefox';
+    assert.ok(M.matchesTitleRule('firefox', popup, rules));
+    assert.ok(M.matchesTitleRule('Firefox', popup, rules));
+    assert.ok(!M.matchesTitleRule('ghostty', popup, rules));
+    assert.ok(!M.matchesTitleRule('firefox', 'Docs: Extension: (Foo) — Mozilla Firefox', rules));
+    assert.ok(!M.matchesTitleRule('firefox', '', rules));
+    assert.ok(!M.matchesTitleRule(null, null, rules));
+});

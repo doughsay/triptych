@@ -23,7 +23,7 @@ or KDE.
 
 ## Status (2026-10-09)
 
-- 40 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
+- 41 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
   session since 2026-10-09: fullscreen HDR games stay untouched.
 - The GitHub repo is `doughsay/triptych`. The extension ID `triptych@doughsay.github.io` is final.
 - v1 feature set is done and verified in nested (2026-10-09): floating regions (Quick Settings
@@ -34,6 +34,9 @@ or KDE.
 - Since then: "Always Float <App>" in the window menu (GSettings `float-classes`) and per-workspace
   persistence of region widths and modes (GSettings `workspace-layouts`, by workspace number).
   Verified in nested; the real session picks them up at the next login.
+- 2026-10-11: `FLOAT_TITLES` floats windows by WM class + title prefix (Firefox extension
+  popups), including a title change within `FLOAT_TITLE_SECONDS` of opening. Verified in nested
+  with a stand-in Ghostty rule; untested with Firefox itself.
 - Dynamic workspaces are untested, and shift the saved workspace numbers.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
@@ -91,7 +94,9 @@ or KDE.
   - Resizing the devkit window or its orange button closes the session.
   - Stop it by killing the `mutter-devkit` PID, never with a `pkill` pattern that could match the
     real `gnome-shell`.
-  - JS logs and errors from the extension don't reach `nested.log`. To debug, write to a file.
+  - JS logs and errors from the extension don't reach `nested.log`. To debug, write to a file
+    under `$HOME` (e.g. `~/.cache/`): the nested shell can't see a sandboxed `/tmp`.
+  - Wait ~10s after "GNOME Shell started" before launching clients, or they may not be tracked.
   - Clients reach it via `WAYLAND_DISPLAY=wayland-1`, e.g. `ghostty --gtk-single-instance=false`.
     For GApplication apps (Calculator, Nautilus, Console) also set `DBUS_SESSION_BUS_ADDRESS` to
     the nested bus (from the nested `gnome-shell`'s `/proc/<pid>/environ`), or they open in the

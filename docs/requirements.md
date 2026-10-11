@@ -78,7 +78,8 @@ Keyboard shortcuts are a nice extra, not the primary interface.
     region.
 - **R8 Floating.** Floating windows keep normal GNOME behaviour.
   - Never tiled: dialogs, transient/modal windows, popups, splash screens, picture-in-picture,
-    fixed-size (non-resizable) windows, the WM class prefixes in `FLOAT_CLASSES`, and apps marked
+    fixed-size (non-resizable) windows, the WM class prefixes in `FLOAT_CLASSES`, the WM class and
+    title prefixes in `FLOAT_TITLES` (e.g. Firefox extension popups), and apps marked
     "Always Float <App>" in the window menu (a checkbox, stored in GSettings by WM class; unchecking
     it tiles the app's windows again).
   - The window menu (right-click the title bar, or Alt+Space) has "Float Window" or "Tile
@@ -270,8 +271,20 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   which is reliable with static workspaces; with dynamic ones, numbers shift when GNOME removes
   an empty workspace.
 
+- **2026-10-11 Float by title (R8).** Wayland has no "floating" hint beyond window type, parent and
+  fixed size, and Firefox extension popups (e.g. a password manager's unlock window) send none of
+  them. `FLOAT_TITLES` matches WM class and title prefix (`firefox` + `Extension: (`). Apps set the
+  final title after opening, so a matching title change within `FLOAT_TITLE_SECONDS` of opening
+  floats a tiled window back at its opening size. Later title changes (switching tabs) never do.
+
 ## Open questions
 
 - **Q9 Boundaries with no windows on either side.** A region boundary between two empty regions
   has no window edge to grab. Should there be a grab handle in the gap between regions? Deferred
   until it's actually annoying.
+
+- **Q10 Windows with size limits.** Mutter's `allows_resize()` is only false when both sides are
+  fixed (min == max). A window with any max size (or one fixed side) fits its slot when it opens,
+  but can't follow a region that's widened later: it leaves a gap and fights the snap-back. Float
+  every window with a finite max size (`get_max_size()`)? Check first what "no max" looks like at
+  runtime (Wayland vs XWayland) in nested.

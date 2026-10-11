@@ -648,3 +648,11 @@ function edgePos(frame, edge, gap) {
 function clamp(v, lo, hi) {
     return Math.min(Math.max(v, lo), hi);
 }
+
+// Whether a window matches one of the `FLOAT_TITLES` rules: its WM class
+// (lowercased) starts with the rule's `wmClass` and its title starts with the
+// rule's `title`.
+export function matchesTitleRule(wmClass, title, rules) {
+    wmClass = (wmClass ?? '').toLowerCase();
+    return rules.some(r => wmClass.startsWith(r.wmClass) && (title ?? '').startsWith(r.title));
+}
