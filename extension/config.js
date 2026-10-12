@@ -12,6 +12,15 @@ export const GAPS = {outer: 8, region: 24, inner: 8};
 // windows float instead of splitting a pane below this.
 export const MIN_SIZE = 240;
 
+// A dragged region or split boundary has soft stops at multiples of
+// RESIZE_SNAP (of the screen width for regions, of the split for splits): it
+// holds at one while the pointer is within SNAP_DISTANCE logical pixels of it,
+// then catches up smoothly, without jumping. In small splits the distance
+// shrinks to a quarter of the spacing, so there's always room in between. A window's minimum size wins over the snap. 0 turns
+// snapping off.
+export const RESIZE_SNAP = 0.05;
+export const SNAP_DISTANCE = 20;
+
 // Windows whose WM class (lowercased) starts with one of these are never tiled.
 // steam_app_ covers Proton/Steam games. wl-copy (used by CLI tools to copy)
 // opens a hidden window for a moment on compositors without data-control,

@@ -124,6 +124,10 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   - No boundary can be dragged so far that a window ends up under its minimum size (the app's own
     minimum, never less than `MIN_SIZE`). That includes windows nested deeper in the split tree
     and windows in the neighboring region. The window being dragged stops at the limit too.
+  - Boundaries have soft stops at multiples of 5% (`RESIZE_SNAP`): of the screen width for
+    region boundaries, of the split for split boundaries. A boundary holds at a stop while the
+    pointer is within `SNAP_DISTANCE` of it, then catches up smoothly, so it never jumps. A
+    minimum size wins over the stops.
 - **R12 Move windows by dragging.** Dragging a window by its title bar and dropping it moves it:
   - Dropping on another region inserts it there. If that region is empty, the window fills it.
   - Dropping onto a specific window in a region splits that window.
@@ -144,6 +148,10 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   on hover or during a drag. An always-on indicator is optional.
   - Region outlines show while moving a tiled window and while resizing (they follow the
     boundaries live).
+  - While a boundary is dragged, a label on it next to the pointer shows the sizes on either side
+    in percent (e.g. `25%  │  50%`): of the screen width for a region boundary, of the split for
+    a split boundary. It sits above all windows but on the boundary, away from the window
+    centers where apps such as Ghostty show their own size overlay.
   - "Reset Region Sizes" in the Quick Settings menu puts the current workspace back to the
     configured widths.
 
@@ -282,6 +290,18 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   closes it. Triptych tiled it like a new window: with every region occupied it split the largest
   pane for a moment, which showed as a flicker on each copy from CLI tools that shell out to
   `wl-copy`. It's in `FLOAT_CLASSES` now.
+
+- **2026-10-12 Size label and snapping (R11, R13).** Custom region widths were hard to set
+  precisely: nothing showed the size, and only Ghostty's own overlay (terminal columns × rows)
+  appeared, and only for Ghostty. A label on the dragged boundary shows percents, which match
+  how region widths are stored and configured and don't change with resolution, scale or gaps.
+  Boundaries snap to nearby multiples of 5% (a first try snapped every whole percent, which
+  made every drag step; snapping only near round sizes keeps free dragging in between). The
+  snap is a soft stop rather than a jump into place, which felt harsh: the boundary holds near
+  a stop and moves slightly faster than the pointer in between. The label shows whole
+  percents. The label goes on the boundary, not in the region's
+  center: outlines sit under windows, so a centered label would only show in empty regions,
+  and a centered one above windows would collide with Ghostty's.
 
 ## Open questions
 

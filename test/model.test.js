@@ -370,9 +370,82 @@ test('in a filled region, any window\'s edge moves the region boundary', () => {
     assert.deepEqual(windows.get('a'), regions[1]);
     // a's west edge too: no split inside a filled region moves.
     const ratio = l.regions[1].root.ratio;
-    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 1100, y: 0, width: 2100, height: 1000}, MIN);
+    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 1200, y: 0, width: 2000, height: 1000}, MIN);
     assert.equal(l.regions[1].root.ratio, ratio);
-    assert.equal(M.computeLayout(l, AREA, GAPS).regions[1].x, 1100);
+    assert.equal(M.computeLayout(l, AREA, GAPS).regions[1].x, 1200);
+});
+
+test('resizeEdge holds boundaries at nearby multiples of 5%, and catches up between', () => {
+    const l = layout();
+    for (const w of ['a', 'b', 'c', 'd'])
+        M.insertWindow(l, w, AREA, GAPS, MIN);
+    const regionWidth = () => M.computeLayout(l, AREA, GAPS).regions[0].width;
+    // Split: 1415 is 15px from 20% of the 2000px split (1400), so it snaps.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'e', {x: 1000, y: 0, width: 415, height: 1000}, MIN);
+    assert.equal(rects(l).get('a').width, 400);
+    // 1450 is halfway between stops, where the boundary meets the pointer.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'e', {x: 1000, y: 0, width: 450, height: 1000}, MIN);
+    assert.equal(rects(l).get('a').width, 450);
+    // Region: 815 is 15px from 20% of the screen (800), so it snaps.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 815, y: 0, width: 600, height: 1000}, MIN);
+    assert.equal(regionWidth(), 800);
+    // 860 is 40px past the 20px hold, out of 80px to the halfway point (900),
+    // so the boundary is halfway from 800 to 900: no jump.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 860, y: 0, width: 600, height: 1000}, MIN);
+    assert.equal(regionWidth(), 850);
+    M.resizeEdge(l, AREA, GAPS, 'a', 'w', {x: 820, y: 0, width: 600, height: 1000}, MIN);
+    assert.equal(regionWidth(), 800);
+});
+
+test('in a small split, the snap distance shrinks so there is room in between', () => {
+    const area = {x: 0, y: 0, width: 1600, height: 1000};
+    const l = layout();
+    // A 400px split: 5% is 20px, so only 5px either side of a multiple snaps.
+    l.regions[0].root = {dir: 'row', ratio: 0.5, a: {win: 'a'}, b: {win: 'b'}};
+    M.resizeEdge(l, area, GAPS, 'a', 'e', {x: 0, y: 0, width: 110, height: 1000}, 10);
+    assert.equal(M.computeLayout(l, area, GAPS).windows.get('a').width, 110);
+    M.resizeEdge(l, area, GAPS, 'a', 'e', {x: 0, y: 0, width: 104, height: 1000}, 10);
+    assert.equal(M.computeLayout(l, area, GAPS).windows.get('a').width, 100);
+});
+
+test('a minimum size beats the snap', () => {
+    const l = layout();
+    l.regions[1].root = {dir: 'row', ratio: 0.5, a: {win: 'a'}, b: {win: 'b'}};
+    // b's minimum (130 of 2000) holds the split at 93.5%, between two snaps.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'e', {x: 1000, y: 0, width: 1990, height: 1000}, 130);
+    assert.equal(rects(l).get('b').width, 130);
+});
+
+test('boundaryInfo describes the boundary under a dragged edge', () => {
+    const l = layout();
+    for (const w of ['a', 'b', 'c', 'd'])
+        M.insertWindow(l, w, AREA, GAPS, MIN);
+    M.resizeEdge(l, AREA, GAPS, 'a', 'e', {x: 1000, y: 0, width: 600, height: 1000}, MIN);
+    // Split boundary: percents of the split.
+    assert.deepEqual(M.boundaryInfo(l, AREA, GAPS, 'a', 'e', MIN),
+        {axis: 'row', pos: 1600, start: 0, end: 1000, percents: [30, 70]});
+    // Region boundary: percents of the screen.
+    assert.deepEqual(M.boundaryInfo(l, AREA, GAPS, 'a', 'w', MIN),
+        {axis: 'row', pos: 1000, start: 0, end: 1000, percents: [25, 50]});
+    // Screen edge: no boundary.
+    assert.equal(M.boundaryInfo(l, AREA, GAPS, 'a', 'n', MIN), null);
+    // Filled region: the inner edge is the region boundary.
+    M.toggleFill(l, 'a');
+    assert.deepEqual(M.boundaryInfo(l, AREA, GAPS, 'a', 'e', MIN).percents, [50, 25]);
+});
+
+test('boundaryInfo percents of a region pair add up when the sizes are uneven', () => {
+    const l = M.createLayout([1, 1, 1]); // 33.3% each
+    l.regions[1].root = {win: 'a'};
+    const {percents} = M.boundaryInfo(l, AREA, GAPS, 'a', 'e', MIN);
+    assert.deepEqual(percents, [34, 33]); // 33 + 34 + 33 = 100
+});
+
+test('boundaryInfo shows a split held at a minimum, not its stored ratio', () => {
+    const l = layout();
+    l.regions[1].root = {dir: 'column', ratio: 0.95, a: {win: 'a'}, b: {win: 'b'}};
+    assert.deepEqual(M.boundaryInfo(l, AREA, GAPS, 'a', 's', MIN),
+        {axis: 'column', pos: 900, start: 1000, end: 3000, percents: [90, 10]});
 });
 
 // --- Floating regions and swap -------------------------------------------

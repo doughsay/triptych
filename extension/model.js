@@ -16,7 +16,7 @@
 // `minSize` is either a number or a function win => { width, height } giving
 // a window's smallest frame size (win is null for an empty region).
 
-import {SWAP_ZONE} from './config.js';
+import {RESIZE_SNAP, SNAP_DISTANCE, SWAP_ZONE} from './config.js';
 
 export function createLayout(sizes) {
     return {
@@ -169,15 +169,20 @@ function tile(node, r, opts, out) {
         return;
     }
     opts.nodeRects?.set(node, r);
+    const [ra, rb] = splitRect(r, node.dir, shownRatio(node, r, gap, mins, visible), gap);
+    tile(node.a, ra, opts, out);
+    tile(node.b, rb, opts, out);
+}
+
+// The ratio a split is laid out at in rect `r`: its stored ratio, clamped so
+// both sides stay above their minimums.
+function shownRatio(node, r, gap, mins, visible) {
     const len = along(r, node.dir);
     const lo = (minExtent(node.a, node.dir, gap, mins, visible) + gap / 2) / len;
     const hi = 1 - (minExtent(node.b, node.dir, gap, mins, visible) + gap / 2) / len;
     // With no room for both minimums (or exactly none, give or take float
     // noise), share the shortfall evenly rather than fall back to the ratio.
-    const ratio = lo <= hi ? clamp(node.ratio, lo, hi) : (lo + hi) / 2;
-    const [ra, rb] = splitRect(r, node.dir, ratio, gap);
-    tile(node.a, ra, opts, out);
-    tile(node.b, rb, opts, out);
+    return lo <= hi ? clamp(node.ratio, lo, hi) : (lo + hi) / 2;
 }
 
 // Round edges (not sizes) so adjacent rects never drift apart by a pixel.
@@ -541,46 +546,60 @@ function half(r, side) {
     }
 }
 
-// The user dragged edge `edge` ('n' | 's' | 'e' | 'w') of `win` so that its
-// frame is now `frame`. Moves the split or region boundary on that edge to
-// follow. Returns true if anything changed.
-export function resizeEdge(layout, area, gaps, win, edge, frame, minSize, visible = always) {
-    const mins = minOf(minSize);
+// The boundary that edge `edge` ('n' | 's' | 'e' | 'w') of `win` sits on:
+// the innermost split along that axis with `win` on the dragged side, else the
+// region boundary on that side. In a filled region only the region shows, so
+// it's always the region boundary. Returns {node, rect} (the split and its
+// unrounded rect), {region: j} (the boundary right of region j), or null.
+function boundaryOf(layout, area, gaps, win, edge, minSize, visible) {
     const found = findWindow(layout, win);
     if (!found)
-        return false;
-    const region = layout.regions[found.region];
+        return null;
     const axis = edge === 'e' || edge === 'w' ? 'row' : 'column';
     const inFirst = edge === 'e' || edge === 's';
-
-    // In a filled region only the region shows, so any edge moves its boundary.
-    if (!region.fill) {
+    if (!layout.regions[found.region].fill) {
         const nodeRects = new Map();
         computeF(layout, area, gaps, visible, minSize, nodeRects);
         const {path} = found;
         for (let i = path.length - 2; i >= 0; i--) {
             const node = path[i];
-            const r = nodeRects.get(node);
-            if (!r || node.dir !== axis || (node.a === path[i + 1]) !== inFirst)
-                continue;
-            const pos = edgePos(frame, edge, gaps.inner);
-            const [start, len] = axis === 'row' ? [r.x, r.width] : [r.y, r.height];
-            const lo = start + minExtent(node.a, axis, gaps.inner, mins, visible) + gaps.inner / 2;
-            const hi = start + len - minExtent(node.b, axis, gaps.inner, mins, visible) -
-                gaps.inner / 2;
-            if (lo > hi)
-                return false;
-            node.ratio = (clamp(pos, lo, hi) - start) / len;
-            return true;
+            const rect = nodeRects.get(node);
+            if (rect && node.dir === axis && (node.a === path[i + 1]) === inFirst)
+                return {node, rect};
         }
     }
-
     if (axis !== 'row')
-        return false;
+        return null;
     const j = edge === 'e' ? found.region : found.region - 1;
-    if (j < 0 || j >= layout.regions.length - 1)
+    return j >= 0 && j < layout.regions.length - 1 ? {region: j} : null;
+}
+
+// The user dragged edge `edge` of `win` so that its frame is now `frame`.
+// Moves the split or region boundary on that edge to follow, snapping to
+// multiples of RESIZE_SNAP (of the split, or of the screen width for a region
+// boundary) when close. Returns true if anything changed.
+export function resizeEdge(layout, area, gaps, win, edge, frame, minSize, visible = always) {
+    const mins = minOf(minSize);
+    const boundary = boundaryOf(layout, area, gaps, win, edge, minSize, visible);
+    if (!boundary)
         return false;
-    const {edges} = regionEdges(layout, area, gaps);
+
+    if (boundary.node) {
+        const {node, rect} = boundary;
+        const axis = node.dir;
+        const pos = edgePos(frame, edge, gaps.inner);
+        const [start, len] = axis === 'row' ? [rect.x, rect.width] : [rect.y, rect.height];
+        const lo = start + minExtent(node.a, axis, gaps.inner, mins, visible) + gaps.inner / 2;
+        const hi = start + len - minExtent(node.b, axis, gaps.inner, mins, visible) -
+            gaps.inner / 2;
+        if (lo > hi)
+            return false;
+        node.ratio = snap((pos - start) / len, (lo - start) / len, (hi - start) / len, len);
+        return true;
+    }
+
+    const j = boundary.region;
+    const {edges, inner} = regionEdges(layout, area, gaps);
     const start = edges[j], end = edges[j + 2];
     // Outer edges of the two regions' content, and the gap each loses at b.
     const left = start + (j > 0 ? gaps.region / 2 : 0);
@@ -591,11 +610,43 @@ export function resizeEdge(layout, area, gaps, win, edge, frame, minSize, visibl
     const hi = right - regionMin(j + 1) - gaps.region / 2;
     if (lo > hi)
         return false;
-    const b = clamp(edgePos(frame, edge, gaps.region), lo, hi);
+    // Snap as a fraction of the whole row, so region sizes come out round.
+    const frac = x => (x - inner.x) / inner.width;
+    const b = inner.x + inner.width *
+        snap(frac(edgePos(frame, edge, gaps.region)), frac(lo), frac(hi), inner.width);
     const pair = layout.regions[j].size + layout.regions[j + 1].size;
     layout.regions[j].size = pair * (b - start) / (end - start);
     layout.regions[j + 1].size = pair - layout.regions[j].size;
     return true;
+}
+
+// The boundary under edge `edge` of `win`, for the size label shown while it's
+// dragged: { axis, pos, start, end, percents: [before, after] }. The boundary
+// is the line x = pos ('row') or y = pos ('column') from start to end.
+// Percents are whole numbers: of the screen width for a region boundary, of
+// the split for a split boundary. null if the edge isn't on a boundary.
+export function boundaryInfo(layout, area, gaps, win, edge, minSize, visible = always) {
+    const boundary = boundaryOf(layout, area, gaps, win, edge, minSize, visible);
+    if (!boundary)
+        return null;
+    if (boundary.node) {
+        const {node, rect} = boundary;
+        const ratio = shownRatio(node, rect, gaps.inner, minOf(minSize), visible);
+        const a = Math.round(ratio * 100);
+        return node.dir === 'row'
+            ? {axis: 'row', pos: rect.x + rect.width * ratio, start: rect.y,
+                end: rect.y + rect.height, percents: [a, 100 - a]}
+            : {axis: 'column', pos: rect.y + rect.height * ratio, start: rect.x,
+                end: rect.x + rect.width, percents: [a, 100 - a]};
+    }
+    const j = boundary.region;
+    const {edges, inner} = regionEdges(layout, area, gaps);
+    const total = layout.regions.reduce((s, r) => s + r.size, 0);
+    const pct = k => layout.regions.slice(0, k).reduce((s, r) => s + r.size, 0) / total * 100;
+    // Rounded cumulatively, so the two always add up to the pair's share.
+    const [x, y, z] = [pct(j), pct(j + 1), pct(j + 2)].map(Math.round);
+    return {axis: 'row', pos: edges[j + 1], start: inner.y, end: inner.y + inner.height,
+        percents: [y - x, z - y]};
 }
 
 // The frame a resize grab asks for: the grab-start frame with the dragged
@@ -647,6 +698,24 @@ function edgePos(frame, edge, gap) {
 
 function clamp(v, lo, hi) {
     return Math.min(Math.max(v, lo), hi);
+}
+
+// Fraction `v` of a length of `len` pixels, with soft stops at multiples of
+// RESIZE_SNAP: within SNAP_DISTANCE pixels of one (or a quarter of the
+// spacing, if less) the boundary holds there, and in between it moves a bit
+// faster than the pointer to catch up, meeting it halfway between stops. So it
+// never jumps. Then clamped to [lo, hi], so a boundary held by a minimum size
+// can still reach it.
+function snap(v, lo, hi, len) {
+    if (RESIZE_SNAP > 0) {
+        const spacing = RESIZE_SNAP * len;
+        const reach = Math.min(SNAP_DISTANCE, spacing / 4);
+        const stop = Math.round(v / RESIZE_SNAP) * RESIZE_SNAP;
+        const d = (v - stop) * len; // pixels from the stop, at most spacing / 2
+        const free = Math.max(Math.abs(d) - reach, 0);
+        v = stop + Math.sign(d) * free * (spacing / 2) / (spacing / 2 - reach) / len;
+    }
+    return clamp(v, lo, hi);
 }
 
 // Whether a window matches one of the `FLOAT_TITLES` rules: its WM class

@@ -22,3 +22,15 @@
   background-color: rgba(46, 194, 126, 0.3);
   border-color: rgba(46, 194, 126, 0.8);
 }
+
+/* Region or split sizes while a boundary is dragged. */
+.triptych-size {
+  background-color: rgba(0, 0, 0, 0.75);
+  color: white;
+  border-radius: 12px;
+  padding: 6px 14px;
+  font-size: 14pt;
+  font-weight: bold;
+  font-feature-settings: "tnum";
+  text-align: center;
+}

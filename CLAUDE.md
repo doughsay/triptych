@@ -23,7 +23,7 @@ or KDE.
 
 ## Status (2026-10-09)
 
-- 41 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
+- 47 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
   session since 2026-10-09: fullscreen HDR games stay untouched.
 - The GitHub repo is `doughsay/triptych`. The extension ID `triptych@doughsay.github.io` is final.
 - v1 feature set is done and verified in nested (2026-10-09): floating regions (Quick Settings
@@ -37,6 +37,8 @@ or KDE.
 - 2026-10-11: `FLOAT_TITLES` floats windows by WM class + title prefix (Firefox extension
   popups), including a title change within `FLOAT_TITLE_SECONDS` of opening. Verified in nested
   with a stand-in Ghostty rule; untested with Firefox itself.
+- 2026-10-12: dragged boundaries have soft stops at multiples of 5% (`RESIZE_SNAP`,
+  `SNAP_DISTANCE`) and show a size label (R11, R13). Verified in nested.
 - Dynamic workspaces are untested, and shift the saved workspace numbers.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares

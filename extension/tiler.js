@@ -21,6 +21,10 @@ import {
 // Direction bits of Meta.GrabOp resize values.
 const EDGE_BITS = [[0x1000, 'w'], [0x2000, 'e'], [0x4000, 's'], [0x8000, 'n']];
 
+// How far along the boundary from the pointer the size label sits, so the
+// cursor doesn't cover it.
+const LABEL_OFFSET = 32;
+
 // Holds a window under a resize grab to its slot in the layout, from inside
 // Mutter's own constraint pass. Without it the window follows the pointer past
 // a boundary's limit, and its far edges lag until the grab ends. `rectFor`
@@ -53,6 +57,7 @@ export class Tiler {
         this._idleId = 0;
         this._grab = null; // {win, ws, kind: 'move' | 'resize', edges, start, constraint}
         this._overlay = null;
+        this._labels = null; // size labels while a boundary is dragged
         this._pending = new Map(); // window actor -> first-frame handler id
     }
 
@@ -571,7 +576,7 @@ export class Tiler {
         return {x, y};
     }
 
-    // --- Drop preview overlay ------------------------------------------------
+    // --- Drop preview, region outlines and size labels ------------------------------------------------
 
     _showOverlay() {
         this._hideOverlay();
@@ -591,6 +596,12 @@ export class Tiler {
         this._preview.hide();
         global.window_group.add_child(this._overlay);
         global.window_group.add_child(this._preview);
+        // A size label per dragged boundary, above every window.
+        this._labels = this._grab.kind === 'resize' ? this._grab.edges.map(() => {
+            const label = new St.Label({style_class: 'triptych-size', visible: false});
+            Main.layoutManager.uiGroup.add_child(label);
+            return label;
+        }) : [];
         this._updateOverlay();
     }
 
@@ -615,8 +626,10 @@ export class Tiler {
             this._regionBoxes[i].set_position(r.x, r.y);
             this._regionBoxes[i].set_size(r.width, r.height);
         });
-        if (grab.kind !== 'move')
+        if (grab.kind !== 'move') {
+            this._updateLabels(layout, area);
             return;
+        }
         const target = Model.dropTarget(layout, area, GAPS, this._pointer(),
             grab.win, this._minSize, this._visible);
         if (!target?.rect) {
@@ -629,6 +642,31 @@ export class Tiler {
         this._preview.set_position(target.rect.x, target.rect.y);
         this._preview.set_size(target.rect.width, target.rect.height);
         this._preview.show();
+    }
+
+    // Each size label sits on its boundary, next to the pointer. A corner
+    // drag has two.
+    _updateLabels(layout, area) {
+        const grab = this._grab;
+        const p = this._pointer();
+        grab.edges.forEach((edge, i) => {
+            const label = this._labels[i];
+            const b = Model.boundaryInfo(layout, area, GAPS, grab.win, edge, this._minSize,
+                this._visible);
+            label.visible = !!b;
+            if (!b)
+                return;
+            const [before, after] = b.percents;
+            label.text = b.axis === 'row' ? `${before}%  │  ${after}%` : `${before}%\n${after}%`;
+            const [, w] = label.get_preferred_width(-1);
+            const [, h] = label.get_preferred_height(w);
+            const along = (pointer, size) =>
+                Math.min(Math.max(pointer + LABEL_OFFSET, b.start), b.end - size);
+            if (b.axis === 'row')
+                label.set_position(Math.round(b.pos - w / 2), Math.round(along(p.y, h)));
+            else
+                label.set_position(Math.round(along(p.x, w)), Math.round(b.pos - h / 2));
+        });
     }
 
     // Outlines go just above the wallpaper, under every window. The preview
@@ -648,8 +686,10 @@ export class Tiler {
     _hideOverlay() {
         this._overlay?.destroy();
         this._preview?.destroy();
+        this._labels?.forEach(label => label.destroy());
         this._overlay = null;
         this._preview = null;
         this._regionBoxes = null;
+        this._labels = null;
     }
 }
