@@ -294,3 +294,10 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   but can't follow a region that's widened later: it leaves a gap and fights the snap-back. Float
   every window with a finite max size (`get_max_size()`)? Check first what "no max" looks like at
   runtime (Wayland vs XWayland) in nested.
+
+- **Q11 User-editable float rules.** `FLOAT_CLASSES` and `FLOAT_TITLES` are constants, so adding
+  an exception means editing `config.js` and logging out. "Always Float <App>" covers whole apps
+  from the window menu, but not a WM class + title prefix (e.g. one Firefox extension popup), nor
+  windows that close too fast to right-click (e.g. `wl-copy`'s hidden window). Supporting both
+  means typing text somewhere, which is close to a config UI. No good answer yet; editing
+  `config.js` is fine for now.
