@@ -277,6 +277,12 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   final title after opening, so a matching title change within `FLOAT_TITLE_SECONDS` of opening
   floats a tiled window back at its opening size. Later title changes (switching tabs) never do.
 
+- **2026-10-12 wl-copy's hidden window floats.** Mutter has no data-control protocol, so `wl-copy`
+  maps a hidden 1x1 toplevel (`io.github.bugaevc.wl-clipboard`) to get keyboard focus, then
+  closes it. Triptych tiled it like a new window: with every region occupied it split the largest
+  pane for a moment, which showed as a flicker on each copy from CLI tools that shell out to
+  `wl-copy`. It's in `FLOAT_CLASSES` now.
+
 ## Open questions
 
 - **Q9 Boundaries with no windows on either side.** A region boundary between two empty regions

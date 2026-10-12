@@ -13,9 +13,12 @@ export const GAPS = {outer: 8, region: 24, inner: 8};
 export const MIN_SIZE = 240;
 
 // Windows whose WM class (lowercased) starts with one of these are never tiled.
-// steam_app_ covers Proton/Steam games.
+// steam_app_ covers Proton/Steam games. wl-copy (used by CLI tools to copy)
+// opens a hidden window for a moment on compositors without data-control,
+// such as Mutter.
 export const FLOAT_CLASSES = [
     'steam',
+    'io.github.bugaevc.wl-clipboard',
 ];
 
 // Windows whose WM class (lowercased) starts with `wmClass` and whose title

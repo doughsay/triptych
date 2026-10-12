@@ -49,8 +49,8 @@ or KDE.
   5. maximize filling the region: **passes**
   6. apps that resize themselves after first frame (Firefox, Electron): **passes**
   7. lock and unlock leave the layout intact: **passes** (real session)
-- Games: `FLOAT_CLASSES` only covers `steam*`. Games run through Wine's Wayland mode may report
-  another WM class; add those to `FLOAT_CLASSES` (R9).
+- `FLOAT_CLASSES` covers `steam*` and `wl-copy`'s hidden clipboard window. Games run through
+  Wine's Wayland mode may report another WM class; add those to `FLOAT_CLASSES` (R9).
 
 ## Hard-won facts
 
