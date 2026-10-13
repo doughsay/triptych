@@ -33,9 +33,11 @@ export const FLOAT_CLASSES = [
 // Windows whose WM class (lowercased) starts with `wmClass` and whose title
 // starts with `title` are never tiled. Firefox titles extension popups (e.g. a
 // password manager's unlock window) "Extension: (<name>) - ...", but otherwise
-// they look like normal Firefox windows.
+// they look like normal Firefox windows. Popped-out videos are titled
+// "Picture-in-Picture".
 export const FLOAT_TITLES = [
     {wmClass: 'firefox', title: 'Extension: ('},
+    {wmClass: 'firefox', title: 'Picture-in-Picture'},
 ];
 
 // Apps often set their final title only after the window has opened, so a
