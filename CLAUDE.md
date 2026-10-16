@@ -21,9 +21,9 @@ or KDE.
   - 32:9 super-ultrawide, 7680x2160 at 125% fractional scaling (6144x1728 logical).
   - Fullscreen HDR games must keep working, and must never be tiled (R9).
 
-## Status (2026-10-09)
+## Status (2026-10-16)
 
-- 47 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
+- 52 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
   session since 2026-10-09: fullscreen HDR games stay untouched.
 - The GitHub repo is `doughsay/triptych`. The extension ID `triptych@doughsay.github.io` is final.
 - v1 feature set is done and verified in nested (2026-10-09): floating regions (Quick Settings
@@ -39,12 +39,17 @@ or KDE.
   with a stand-in Ghostty rule; untested with Firefox itself.
 - 2026-10-12: dragged boundaries have soft stops at multiples of 5% (`RESIZE_SNAP`,
   `SNAP_DISTANCE`) and show a size label (R11, R13). Verified in nested.
+- 2026-10-16: new windows open at the pointer, splitting the pane under it on the pointer's side
+  (R10). A launch from the overview uses the pointer from before the overview opened
+  (`OVERVIEW_SECONDS`). Largest-pane placement is the fallback. Verified in nested at 100%
+  scale; the real session (125%) picks it up at the next login.
 - Dynamic workspaces are untested, and shift the saved workspace numbers.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
   the same files (and loads them at its next login).
 - Checks (1–6 in nested, 7 in the real session):
-  1. new-window placement: **passes** (after the snap-back and largest-pane changes)
+  1. new-window placement: **passes** (after the snap-back and largest-pane changes, and again
+     with pointer placement on 2026-10-16)
   2. dragging into side regions vs Mutter's edge-tiling (Q8): **passes**
   3. drag overlay and drop, including the red preview for refused drops: **passes**
   4. edge-resizing splits and region boundaries: **passes**

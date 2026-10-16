@@ -45,6 +45,11 @@ export const FLOAT_TITLES = [
 // changes (e.g. switching tabs) never do.
 export const FLOAT_TITLE_SECONDS = 5;
 
+// A new window opens where the pointer is (R10). Launched from the overview,
+// it opens where the pointer was when the overview opened, if it appears
+// while the overview is open or within this many seconds after it closes.
+export const OVERVIEW_SECONDS = 10;
+
 // Dropping a window this close to another window's center (as a fraction of
 // its size) swaps the two instead of splitting: 0.25 = the middle half in each
 // direction.

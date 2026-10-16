@@ -97,6 +97,63 @@ test('a new window floats when no pane can split above the minimum', () => {
     assert.equal(M.insertWindow(l, 'e', AREA, GAPS, 500), 1);
 });
 
+test('insertAt splits the pane under the point, on the point\'s side', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    // Left of the center's middle: the new window goes left, even with the
+    // side regions empty.
+    assert.equal(M.insertAt(l, 'b', {x: 1200, y: 500}, AREA, GAPS, MIN), 1);
+    // a is now 1000x1000 at x 2000: right of its middle.
+    assert.equal(M.insertAt(l, 'c', {x: 2900, y: 100}, AREA, GAPS, MIN), 1);
+    // c is 500x1000 (tall): above its middle.
+    assert.equal(M.insertAt(l, 'd', {x: 2700, y: 400}, AREA, GAPS, MIN), 1);
+    const r = rects(l);
+    assert.deepEqual(r.get('b'), {x: 1000, y: 0, width: 1000, height: 1000});
+    assert.deepEqual(r.get('a'), {x: 2000, y: 0, width: 500, height: 1000});
+    assert.deepEqual(r.get('d'), {x: 2500, y: 0, width: 500, height: 500});
+    assert.deepEqual(r.get('c'), {x: 2500, y: 500, width: 500, height: 500});
+});
+
+test('insertAt fills an empty region under the point', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    assert.equal(M.insertAt(l, 'b', {x: 3500, y: 500}, AREA, GAPS, MIN), 2);
+    assert.deepEqual(rects(l).get('b'), {x: 3000, y: 0, width: 1000, height: 1000});
+});
+
+test('insertAt falls back to the region\'s largest pane, then the usual placement', () => {
+    const l = layout();
+    const mins = () => ({width: 400, height: 600});
+    M.insertWindow(l, 'a', AREA, GAPS, mins);
+    M.insertAt(l, 'b', {x: 2500, y: 500}, AREA, GAPS, mins); // a | b, 1000 each
+    M.insertAt(l, 'c', {x: 2900, y: 500}, AREA, GAPS, mins); // b | c, 500 each
+    // c can't split either way, so a (the region's largest) does.
+    assert.equal(M.insertAt(l, 'd', {x: 2900, y: 500}, AREA, GAPS, mins), 1);
+    assert.deepEqual(rects(l).get('d'), {x: 1500, y: 0, width: 500, height: 1000});
+    // With no room left in the center, the empty left region gets it.
+    assert.equal(M.insertAt(l, 'e', {x: 2900, y: 500}, AREA, GAPS, mins), 0);
+});
+
+test('insertAt uses the usual placement outside the area or in a floating region', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    assert.equal(M.insertAt(l, 'b', {x: 3500, y: -10}, AREA, GAPS, MIN), 0);
+    M.setRegionFloating(l, 2, true);
+    assert.equal(M.insertAt(l, 'c', {x: 3500, y: 500}, AREA, GAPS, MIN), 1);
+});
+
+test('insertAt hit-tests the panes as shown, without minimized windows', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    M.insertAt(l, 'b', {x: 2500, y: 500}, AREA, GAPS, MIN); // a | b
+    const visible = w => w !== 'a';
+    // a is minimized, so b covers the center: the left of it splits b.
+    M.insertAt(l, 'c', {x: 1200, y: 500}, AREA, GAPS, MIN, visible);
+    const r = M.computeLayout(l, AREA, GAPS, visible).windows;
+    assert.deepEqual(r.get('c'), {x: 1000, y: 0, width: 1000, height: 1000});
+    assert.deepEqual(r.get('b'), {x: 2000, y: 0, width: 1000, height: 1000});
+});
+
 test('removing a window collapses its split; the last one empties the region', () => {
     const l = layout();
     for (const w of ['a', 'b', 'c'])

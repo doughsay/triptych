@@ -15,7 +15,8 @@ import {WindowMenu} from 'resource:///org/gnome/shell/ui/windowMenu.js';
 
 import * as Model from './model.js';
 import {
-    FLOAT_CLASSES, FLOAT_TITLE_SECONDS, FLOAT_TITLES, GAPS, MIN_SIZE, REGION_SIZES,
+    FLOAT_CLASSES, FLOAT_TITLE_SECONDS, FLOAT_TITLES, GAPS, MIN_SIZE, OVERVIEW_SECONDS,
+    REGION_SIZES,
 } from './config.js';
 
 // Direction bits of Meta.GrabOp resize values.
@@ -59,6 +60,8 @@ export class Tiler {
         this._overlay = null;
         this._labels = null; // size labels while a boundary is dragged
         this._pending = new Map(); // window actor -> first-frame handler id
+        this._overviewPoint = null; // the pointer when the overview last opened
+        this._overviewUntil = 0; // monotonic time until which new windows use it
     }
 
     enable() {
@@ -71,6 +74,13 @@ export class Tiler {
         this._connect(Main.layoutManager, 'monitors-changed', () => this._queueAll());
         this._connect(global.workspace_manager, 'workspace-removed', () => this._pruneLayouts());
         this._connect(this._settings, 'changed::float-classes', () => this._resyncTracking());
+        this._connect(Main.overview, 'showing', () => {
+            const [x, y] = global.get_pointer();
+            this._overviewPoint = {x, y};
+        });
+        this._connect(Main.overview, 'hidden', () => {
+            this._overviewUntil = GLib.get_monotonic_time() + OVERVIEW_SECONDS * 1e6;
+        });
 
         // "Float Window" / "Tile Window" in the window menu.
         const tiler = this;
@@ -120,13 +130,23 @@ export class Tiler {
         const actor = win.get_compositor_private();
         if (!actor)
             return;
+        const point = this._launchPoint();
         const id = actor.connect('first-frame', () => {
             actor.disconnect(id);
             this._pending.delete(actor);
-            this._track(win, true);
+            this._track(win, true, point);
             this._onFocus();
         });
         this._pending.set(actor, id);
+    }
+
+    // Where a new window opens (R10): at the pointer, or, launched from the
+    // overview, where the pointer was when the overview opened.
+    _launchPoint() {
+        if (Main.overview.visible || GLib.get_monotonic_time() < this._overviewUntil)
+            return this._overviewPoint;
+        const [x, y] = global.get_pointer();
+        return {x, y};
     }
 
     // `ignoreAppRules`: leave out the "Always Float" apps (for the menu, which
@@ -160,8 +180,8 @@ export class Tiler {
     }
 
     // `opened`: the window has just opened, so a title change can still float
-    // it for a few seconds (FLOAT_TITLES).
-    _track(win, opened = false) {
+    // it for a few seconds (FLOAT_TITLES). `point`: where it opens (R10).
+    _track(win, opened = false, point = null) {
         if (this._windows.has(win) || !this._isTileable(win) ||
             Model.matchesTitleRule(win.get_wm_class(), win.get_title(), FLOAT_TITLES))
             return;
@@ -182,7 +202,7 @@ export class Tiler {
         // Windows that open maximized are tiled normally, not region-filled.
         if (win.get_maximize_flags())
             this._unmaximize(win);
-        this._syncWorkspace(win);
+        this._syncWorkspace(win, point);
     }
 
     _untrack(win, relayout) {
@@ -221,8 +241,9 @@ export class Tiler {
     }
 
     // Puts the window into its workspace's layout, running the placement
-    // policy. Only called when a window is tracked or changes workspace.
-    _syncWorkspace(win) {
+    // policy, at `point` if given. Only called when a window is tracked or
+    // changes workspace.
+    _syncWorkspace(win, point = null) {
         const state = this._windows.get(win);
         const ws = win.is_on_all_workspaces() ? null : win.get_workspace();
         if (!state || state.ws === ws)
@@ -234,7 +255,13 @@ export class Tiler {
         state.ws = ws;
         const area = ws && this._area(ws);
         // With no room, the window floats until it's dragged into a region.
-        if (area && Model.insertWindow(this._layout(ws), win, area, GAPS, this._minSize) !== null)
+        if (!area)
+            return;
+        const layout = this._layout(ws);
+        const region = point
+            ? Model.insertAt(layout, win, point, area, GAPS, this._minSize, this._visible)
+            : Model.insertWindow(layout, win, area, GAPS, this._minSize);
+        if (region !== null)
             this._queue(ws);
     }
 

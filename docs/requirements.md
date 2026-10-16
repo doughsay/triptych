@@ -99,19 +99,37 @@ Keyboard shortcuts are a nice extra, not the primary interface.
 
 ## Placement of new windows
 
-- **R10 Placement policy.** Each rule applies only if the ones before it don't:
-  1. **If any region on the current workspace is empty,** the new window goes into the next
-     available empty region and fills it. "Next" needs a defined order (Q1).
-  2. **If no region is empty,** the new window splits the largest pane (by area) on the screen,
-     along its longer side (or across it, if the windows only fit that way), and goes after it
-     (right or below). Sizes are compared without gaps,
-     so panes that are the same fraction of the screen tie. Ties go to the first pane in
-     empty-region order (Q1), then in tree order. Focus plays no part, so placement is predictable.
-  3. **If no pane can split** without the new window or the window it splits going under its
-     minimum size, the new window floats. "Tile Window" in the window menu tries again. A window's minimum is
-     the app's own minimum size, but never less than `MIN_SIZE`.
-  4. **If there are no regions on this monitor** (other monitors, R14), GNOME's default
+- **R10 Placement policy.** A new window opens where the pointer is. Launched from the overview
+  (e.g. Super, type the app name, Enter), it uses where the pointer was when the overview
+  opened, if the window appears while the overview is open or within `OVERVIEW_SECONDS` after
+  it closes. The point is read when the window is created, not when the app was launched, so a
+  slow app follows the pointer if it moved in between. Each rule applies only if the ones
+  before it don't:
+  1. **If the point is over a tiled pane** (or in a gap, the nearest pane in its region), that
+     pane splits along its longer side (or across it, if the windows only fit that way). The new
+     window takes the half the point is in. Panes are taken as shown: minimized windows take no
+     space, and a region fill is ignored.
+  2. **If the point is over an empty tiled region,** the new window fills it.
+  3. **If that pane can't split,** the region's largest pane that can splits instead, new window
+     after it (right or below).
+  4. **Otherwise the usual placement applies:** when that region has no room, when the point is
+     outside the work area (e.g. on the top bar or the hot corner), or when it's in a floating
+     region (Mutter, not Triptych, would decide where a floating window opens).
+     1. **If any region on the current workspace is empty,** the new window goes into the next
+        available empty region and fills it, in empty-region order (Q1).
+     2. **If no region is empty,** the new window splits the largest pane (by area) on the
+        screen, along its longer side (or across it, if the windows only fit that way), and goes
+        after it (right or below). Sizes are compared without gaps, so panes that are the same
+        fraction of the screen tie. Ties go to the first pane in empty-region order (Q1), then
+        in tree order.
+     3. **If no pane can split** without the new window or the window it splits going under its
+        minimum size, the new window floats. "Tile Window" in the window menu tries again. A
+        window's minimum is the app's own minimum size, but never less than `MIN_SIZE`.
+  5. **If there are no regions on this monitor** (other monitors, R14), GNOME's default
      placement applies.
+
+  Windows that aren't new have no meaningful point and always use the usual placement: windows
+  moved to another workspace (R17), "Tile Window", and every window when Triptych is turned on.
 
 ## Mouse interaction (primary)
 
@@ -218,7 +236,8 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   split above `MIN_SIZE`, the new window floats, because a pane smaller than an app's own minimum
   size makes Mutter drop the move entirely. Sizes are compared without gaps, so equal fractions
   of the screen tie (otherwise the gaps make the center halves a few pixels smaller than the side
-  regions, and the order looks arbitrary). Drops follow the same minimum (R12).
+  regions, and the order looks arbitrary). Drops follow the same minimum (R12). *For new windows,
+  superseded on 2026-10-16, see below. It's still the fallback.*
 - **2026-10-08 Tiling (R4, R5).** Tiling is automatic split tiling (bspwm/i3/Forge style). There
   is no manual window placement or resizing; only region and split boundaries are dragged.
 - **2026-10-08 Workspaces (R2).** Region boundaries are per workspace and start from the
@@ -302,6 +321,19 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   percents. The label goes on the boundary, not in the region's
   center: outlines sit under windows, so a centered label would only show in empty regions,
   and a centered one above windows would collide with Ghostty's.
+- **2026-10-16 Placement at the pointer (R10).** Placing by largest pane was predictable but
+  rarely where the window was wanted. Most new windows are terminals opened with a keyboard
+  shortcut while pointing at where they should go. The pointer, not focus, decides: with
+  focus-follows-mouse the two usually agree, but the pointer can also point at an empty region,
+  and it's a deliberate choice rather than a side effect of where the mouse passed (the reason
+  focus-following was dropped on 2026-10-09). The new window takes the half the pointer is in,
+  like a drop (R12). A launch from the overview uses the pointer from before the overview opened,
+  since the overview covers the windows and the pointer may be on an app icon. Opening the
+  overview with the hot corner or the Activities button leaves the pointer on the top bar,
+  outside the work area, so the usual placement applies. Known limitation: a window opened by
+  any means within `OVERVIEW_SECONDS` of closing the overview also uses that point. The largest-pane
+  rule stays as the fallback, and for workspace moves, "Tile Window" and turning Triptych on,
+  where the pointer means nothing.
 
 ## Open questions
 

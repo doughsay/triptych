@@ -308,6 +308,47 @@ export function insertWindow(layout, win, area, gaps, minSize) {
     return splitLargest(layout, win, area, gaps, order, minSize);
 }
 
+// Placement at a point (R10), usually the pointer. Over a pane, that pane
+// splits along its longer side (or across it, if the windows only fit that way)
+// and the new window takes the half the point is in. Over an empty region, it
+// fills it. If the pane can't split, the region's largest pane that can splits
+// instead, and failing that the usual placement applies. So does a point
+// outside `area` or in a floating region. Panes are hit-tested as shown, minus
+// any fill: minimized windows take no space.
+export function insertAt(layout, win, point, area, gaps, minSize, visible = always) {
+    const regions = regionRectsF(layout, area, gaps);
+    const i = regionIndexAt(regions, gaps, point);
+    if (!contains(area, point) || layout.regions[i].floating)
+        return insertWindow(layout, win, area, gaps, minSize);
+    const mins = minOf(minSize);
+    const panes = new Map();
+    tile(layout.regions[i].root, regions[i], {gap: gaps.inner, visible, mins}, panes);
+    // The pane under the point, or failing that the nearest one.
+    let best = null, bestDist = Infinity;
+    for (const [w, r] of panes) {
+        const d = distance(r, point);
+        if (d < bestDist) {
+            best = {leafWin: w, r};
+            bestDist = d;
+        }
+    }
+    if (best) {
+        const {leafWin, r} = best;
+        const preferred = splitDir(r);
+        const dir = [preferred, preferred === 'row' ? 'column' : 'row'].find(d =>
+            canSplit(r, d, gaps.inner, leafWin, win, mins));
+        if (dir) {
+            const newFirst = dir === 'row'
+                ? point.x < r.x + r.width / 2
+                : point.y < r.y + r.height / 2;
+            splitLeaf(layout.regions[i], leafWin, win, dir, newFirst);
+            return i;
+        }
+    }
+    return insertInto(layout, win, i, area, gaps, minSize) ??
+        insertWindow(layout, win, area, gaps, minSize);
+}
+
 // Tiles `win` into region `i`: fills it if empty, else splits its largest pane
 // that has room. Returns i, or null if the region is floating or has no room.
 export function insertInto(layout, win, i, area, gaps, minSize) {
