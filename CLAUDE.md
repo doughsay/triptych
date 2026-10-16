@@ -40,9 +40,8 @@ or KDE.
 - 2026-10-12: dragged boundaries have soft stops at multiples of 5% (`RESIZE_SNAP`,
   `SNAP_DISTANCE`) and show a size label (R11, R13). Verified in nested.
 - 2026-10-16: new windows open at the pointer, splitting the pane under it on the pointer's side
-  (R10). A launch from the overview uses the pointer from before the overview opened
-  (`OVERVIEW_SECONDS`). Largest-pane placement is the fallback. Verified in nested at 100%
-  scale; the real session (125%) picks it up at the next login.
+  (R10), including launches from the overview (no special handling). Largest-pane placement is
+  the fallback. Verified in nested; the real session picks it up at the next login.
 - Dynamic workspaces are untested, and shift the saved workspace numbers.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
@@ -102,7 +101,16 @@ or KDE.
   - Stop it by killing the `mutter-devkit` PID, never with a `pkill` pattern that could match the
     real `gnome-shell`.
   - JS logs and errors from the extension don't reach `nested.log`. To debug, write to a file
-    under `$HOME` (e.g. `~/.cache/`): the nested shell can't see a sandboxed `/tmp`.
+    under `$HOME` (e.g. `~/.cache/`): the nested shell can't see a sandboxed `/tmp`. An
+    extension that failed to enable reports why: `gdbus call --session --dest
+    org.gnome.Shell.Extensions --object-path /org/gnome/Shell/Extensions --method
+    org.gnome.Shell.Extensions.GetExtensionInfo <uuid>` on the nested bus (`state`, `error`).
+  - For throwaway probe code, run the nested shell with `XDG_DATA_HOME` pointing at a dir that
+    holds a *copy* of the extension, so the symlinked tree the real session loads stays clean.
+  - Scripted checks can drive the pointer: `global.stage.context.get_backend()
+    .get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE)`, then
+    `notify_absolute_motion(GLib.get_monotonic_time(), x, y)`. (`Clutter.get_default_backend()`
+    is gone in 51.)
   - Wait ~10s after "GNOME Shell started" before launching clients, or they may not be tracked.
   - Clients reach it via `WAYLAND_DISPLAY=wayland-1`, e.g. `ghostty --gtk-single-instance=false`.
     For GApplication apps (Calculator, Nautilus, Console) also set `DBUS_SESSION_BUS_ADDRESS` to

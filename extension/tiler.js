@@ -15,8 +15,7 @@ import {WindowMenu} from 'resource:///org/gnome/shell/ui/windowMenu.js';
 
 import * as Model from './model.js';
 import {
-    FLOAT_CLASSES, FLOAT_TITLE_SECONDS, FLOAT_TITLES, GAPS, MIN_SIZE, OVERVIEW_SECONDS,
-    REGION_SIZES,
+    FLOAT_CLASSES, FLOAT_TITLE_SECONDS, FLOAT_TITLES, GAPS, MIN_SIZE, REGION_SIZES,
 } from './config.js';
 
 // Direction bits of Meta.GrabOp resize values.
@@ -60,8 +59,6 @@ export class Tiler {
         this._overlay = null;
         this._labels = null; // size labels while a boundary is dragged
         this._pending = new Map(); // window actor -> first-frame handler id
-        this._overviewPoint = null; // the pointer when the overview last opened
-        this._overviewUntil = 0; // monotonic time until which new windows use it
     }
 
     enable() {
@@ -74,13 +71,6 @@ export class Tiler {
         this._connect(Main.layoutManager, 'monitors-changed', () => this._queueAll());
         this._connect(global.workspace_manager, 'workspace-removed', () => this._pruneLayouts());
         this._connect(this._settings, 'changed::float-classes', () => this._resyncTracking());
-        this._connect(Main.overview, 'showing', () => {
-            const [x, y] = global.get_pointer();
-            this._overviewPoint = {x, y};
-        });
-        this._connect(Main.overview, 'hidden', () => {
-            this._overviewUntil = GLib.get_monotonic_time() + OVERVIEW_SECONDS * 1e6;
-        });
 
         // "Float Window" / "Tile Window" in the window menu.
         const tiler = this;
@@ -130,23 +120,15 @@ export class Tiler {
         const actor = win.get_compositor_private();
         if (!actor)
             return;
-        const point = this._launchPoint();
+        // A new window opens where the pointer is when it's created (R10).
+        const [x, y] = global.get_pointer();
         const id = actor.connect('first-frame', () => {
             actor.disconnect(id);
             this._pending.delete(actor);
-            this._track(win, true, point);
+            this._track(win, true, {x, y});
             this._onFocus();
         });
         this._pending.set(actor, id);
-    }
-
-    // Where a new window opens (R10): at the pointer, or, launched from the
-    // overview, where the pointer was when the overview opened.
-    _launchPoint() {
-        if (Main.overview.visible || GLib.get_monotonic_time() < this._overviewUntil)
-            return this._overviewPoint;
-        const [x, y] = global.get_pointer();
-        return {x, y};
     }
 
     // `ignoreAppRules`: leave out the "Always Float" apps (for the menu, which

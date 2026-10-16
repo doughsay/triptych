@@ -99,12 +99,10 @@ Keyboard shortcuts are a nice extra, not the primary interface.
 
 ## Placement of new windows
 
-- **R10 Placement policy.** A new window opens where the pointer is. Launched from the overview
-  (e.g. Super, type the app name, Enter), it uses where the pointer was when the overview
-  opened, if the window appears while the overview is open or within `OVERVIEW_SECONDS` after
-  it closes. The point is read when the window is created, not when the app was launched, so a
-  slow app follows the pointer if it moved in between. Each rule applies only if the ones
-  before it don't:
+- **R10 Placement policy.** A new window opens where the pointer is, however it was launched.
+  The point is read when the window is created, not when the app was launched, so a slow app
+  follows the pointer if it moved in between. Each rule applies only if the ones before it
+  don't:
   1. **If the point is over a tiled pane** (or in a gap, the nearest pane in its region), that
      pane splits along its longer side (or across it, if the windows only fit that way). The new
      window takes the half the point is in. Panes are taken as shown: minimized windows take no
@@ -327,13 +325,14 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   focus-follows-mouse the two usually agree, but the pointer can also point at an empty region,
   and it's a deliberate choice rather than a side effect of where the mouse passed (the reason
   focus-following was dropped on 2026-10-09). The new window takes the half the pointer is in,
-  like a drop (R12). A launch from the overview uses the pointer from before the overview opened,
-  since the overview covers the windows and the pointer may be on an app icon. Opening the
-  overview with the hot corner or the Activities button leaves the pointer on the top bar,
-  outside the work area, so the usual placement applies. Known limitation: a window opened by
-  any means within `OVERVIEW_SECONDS` of closing the overview also uses that point. The largest-pane
-  rule stays as the fallback, and for workspace moves, "Tile Window" and turning Triptych on,
-  where the pointer means nothing.
+  like a drop (R12). The overview gets no special handling: an app clicked in the dash or app
+  grid opens where it was clicked, and a keyboard launch (Super, type, Enter) leaves the pointer
+  where it was. Remembering the pointer from before the overview opened was tried and dropped
+  the same day: a 10 s timer after closing the overview misplaced windows opened by a shortcut
+  just after an unrelated look at the overview, and matching windows to overview launches by
+  startup sequence worked but added fragile glue for little gain. The largest-pane rule stays
+  as the fallback, and for workspace moves, "Tile Window" and turning Triptych on, where the
+  pointer means nothing.
 
 ## Open questions
 
