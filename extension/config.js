@@ -45,7 +45,11 @@ export const FLOAT_TITLES = [
 // changes (e.g. switching tabs) never do.
 export const FLOAT_TITLE_SECONDS = 5;
 
-// Dropping a window this close to another window's center (as a fraction of
-// its size) swaps the two instead of splitting: 0.25 = the middle half in each
-// direction.
+// The middle of a window, as a fraction of its size from its center: 0.25 =
+// the middle half in each direction. Dropping a window in its upper half adds
+// it as a tab, in its lower half swaps the two. Over a tab group, all of it
+// adds a tab.
 export const SWAP_ZONE = 0.25;
+
+// Height of a tab group's bar of tabs, in logical pixels.
+export const TAB_BAR_HEIGHT = 32;

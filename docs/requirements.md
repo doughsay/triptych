@@ -62,6 +62,12 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   - The direction of a new split is chosen automatically. The likely rule is to split along the
     longer side of the window being split, so tall, narrow side regions stack windows vertically.
     This needs confirming (Q2).
+  - Any pane can be a tab group: several windows share the pane, one shown at a time, under a
+    bar of tabs (`TAB_BAR_HEIGHT`, then half the inner gap). Each tab shows the app icon and
+    window title. Clicking a tab shows its window, and middle-clicking closes it. The showing
+    tab is lighter, the others darker; no accent color. A group with one window left is a plain
+    pane again. New windows split a group like any other pane (R10). A group splits and swaps
+    places as a whole, and its minimum size is its largest window's plus the bar and gap.
 - **R5 No manual window geometry for tiled windows.** Tiled windows are never freely moved or
   resized. The only things the user sizes directly are region boundaries and split boundaries
   (R11). Tiled window edges always follow the boundaries. Floating windows (R8) move freely.
@@ -152,9 +158,14 @@ Keyboard shortcuts are a nice extra, not the primary interface.
     "Tile Window" in the window menu is the way back into tiling.
   - A drop that would put either window under its minimum size is refused, and the preview turns
     red. Nothing changes: a tiled window goes back to its slot, and a floating one stays floating.
-  - Dropping a tiled window on the middle of another (`SWAP_ZONE`, the middle half each way)
-    swaps the two, as in Forge. The preview covers the whole target. Refused if either window
-    wouldn't fit the other's slot.
+  - Dropping a tiled window on the lower half of the middle of another (`SWAP_ZONE`, the middle
+    half each way) swaps the two, as in Forge. The preview covers the whole target. Refused if
+    either window wouldn't fit the other's slot.
+  - Dropping on the upper half of a window's middle adds the dragged window as a tab, making a
+    tab group. Over a tab group, the whole middle and the tab bar add a tab, and only the sides
+    split. Windows already in a tab group never swap. The preview is purple.
+  - Dragging a window to a side of its own tab group splits it out of the group. Its own
+    group's middle and bar mean no change.
   - Dropping into a floating region floats the window where it's dropped.
   - A visual hint shows the drop target while dragging. Floating regions get no outline and no
     preview.
@@ -216,7 +227,7 @@ Keyboard shortcuts are a nice extra, not the primary interface.
 - Being a general-purpose tiling WM. Manual split directions, scripting and multiple layout
   algorithms are out of scope.
 - Free-floating placement of tiled windows (R5).
-- Tabs or stacking within a region. This is a possible later feature (Q4).
+- Stacking (as opposed to tabs) within a region.
 - Rows of regions, or more than one row.
 - Supporting X11 sessions, which were removed in GNOME 50 anyway.
 - Publishing to extensions.gnome.org. This may happen later, but it isn't a requirement.
@@ -333,6 +344,27 @@ Keyboard shortcuts are a nice extra, not the primary interface.
   startup sequence worked but added fragile glue for little gain. The largest-pane rule stays
   as the fallback, and for workspace moves, "Tile Window" and turning Triptych on, where the
   pointer means nothing.
+- **2026-10-19 Q4 Tabs (R4, R12).** Tabs are per pane: a tab group replaces a single window
+  in the split tree. That covers tabs for a whole region (a region whose only pane is a group)
+  without Forge's i3-style tabbing of whole subtrees, which is where most of its complexity
+  lives. The drop zones follow Forge's center zone, but split it: upper half tabs, lower half
+  swaps, so both stay one drag away without a setting. On a group the whole middle and the bar
+  tab, since swapping one window with a group has no clear meaning. Which tab shows isn't
+  stored: every window of a group gets the same rect and the top one in the stacking order
+  shows, so focus from anywhere (Alt-Tab, notifications, a tab click) keeps the bar right
+  without extra bookkeeping. The bar lives in `window_group` just above its showing window, so
+  floating windows still cover it. It's hidden on other workspaces and whenever anything is
+  fullscreen on the monitor (R9): an actor above a fullscreen window would cover the game and
+  stop it from being unredirected. A filled region (R7) shows no bars. The bar takes no accent
+  color, and the drop preview for tabs is purple. The bar stands apart from its window, with
+  tabs rounded on all corners and opaque: window corners are drawn by each app (very round in
+  Ghostty, square in Discord) and Mutter doesn't expose the radius, so a bar joined to the
+  window can't match them all. The gap under the bar is half the inner gap, so the bar still
+  reads as belonging to its window rather than as a pane of its own. The gap also leaves the
+  window's own top resize border free, so a group can be resized from its top edge. A new
+  window opening over a group splits it rather than joining it, to keep R10 simple; this can
+  change if joining turns out to be wanted.
+  Tabs can't be reordered or dragged out of the bar; dragging the window itself moves it.
 
 ## Open questions
 

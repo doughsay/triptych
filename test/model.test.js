@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as M from '../extension/model.js';
-import {GAPS as REAL_GAPS, MIN_SIZE, REGION_SIZES} from '../extension/config.js';
+import {GAPS as REAL_GAPS, MIN_SIZE, REGION_SIZES, TAB_BAR_HEIGHT as H} from '../extension/config.js';
 
 const AREA = {x: 0, y: 0, width: 4000, height: 1000};
 const GAPS = {outer: 0, region: 0, inner: 0};
@@ -650,4 +650,176 @@ test('matchesTitleRule needs both the class and the title prefix', () => {
     assert.ok(!M.matchesTitleRule('firefox', 'Docs: Extension: (Foo) — Mozilla Firefox', rules));
     assert.ok(!M.matchesTitleRule('firefox', '', rules));
     assert.ok(!M.matchesTitleRule(null, null, rules));
+});
+
+// Left: c. Center: a tab group of a and b. Right: d.
+const tabbed = () => {
+    const l = layout();
+    l.regions[0].root = {win: 'c'};
+    l.regions[1].root = {tabs: ['a', 'b']};
+    l.regions[2].root = {win: 'd'};
+    return l;
+};
+
+test('dropping on the upper middle of a window makes a tab group', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    M.insertWindow(l, 'b', AREA, GAPS, MIN);
+    const t = M.dropTarget(l, AREA, GAPS, {x: 2000, y: 400}, 'b', MIN);
+    assert.equal(t.tab, true);
+    assert.equal(t.win, 'a');
+    assert.deepEqual(t.rect, {x: 1000, y: 0, width: 2000, height: 1000});
+    assert.equal(M.moveWindow(l, 'b', t, AREA, GAPS), true);
+    assert.equal(l.regions[0].root, null);
+    assert.deepEqual(l.regions[1].root, {tabs: ['a', 'b']});
+    // Both windows get the pane under the bar.
+    const {windows, tabBars} = M.computeLayout(l, AREA, GAPS);
+    const under = {x: 1000, y: H, width: 2000, height: 1000 - H};
+    assert.deepEqual(windows.get('a'), under);
+    assert.deepEqual(windows.get('b'), under);
+    assert.equal(tabBars.length, 1);
+    assert.deepEqual(tabBars[0].wins, ['a', 'b']);
+    assert.deepEqual(tabBars[0].rect, {x: 1000, y: 0, width: 2000, height: H});
+    assert.equal(tabBars[0].group, l.regions[1].root);
+});
+
+test('the lower middle swaps tiled windows; a floating window gets a tab there', () => {
+    const l = layout();
+    M.insertWindow(l, 'a', AREA, GAPS, MIN);
+    M.insertWindow(l, 'b', AREA, GAPS, MIN);
+    assert.equal(M.dropTarget(l, AREA, GAPS, {x: 2000, y: 600}, 'b', MIN).swap, true);
+    const t = M.dropTarget(l, AREA, GAPS, {x: 2000, y: 600}, 'f', MIN);
+    assert.equal(t.tab, true);
+    assert.equal(M.moveWindow(l, 'f', t, AREA, GAPS), true);
+    assert.deepEqual(l.regions[1].root, {tabs: ['a', 'f']});
+});
+
+test('over a tab group, the middle and the bar add a tab, the sides split it', () => {
+    let l = tabbed();
+    // Lower middle: a tab, not a swap.
+    let t = M.dropTarget(l, AREA, GAPS, {x: 2000, y: 600}, 'c', MIN);
+    assert.equal(t.tab, true);
+    assert.deepEqual(t.rect, {x: 1000, y: 0, width: 2000, height: 1000});
+    // The bar, even near its end.
+    t = M.dropTarget(l, AREA, GAPS, {x: 2950, y: H / 2}, 'c', MIN);
+    assert.equal(t.tab, true);
+    M.moveWindow(l, 'c', t, AREA, GAPS);
+    assert.deepEqual(l.regions[1].root, {tabs: ['a', 'b', 'c']});
+
+    l = tabbed();
+    t = M.dropTarget(l, AREA, GAPS, {x: 2900, y: 500}, 'c', MIN);
+    assert.equal(t.side, 'right');
+    M.moveWindow(l, 'c', t, AREA, GAPS);
+    const r = rects(l);
+    assert.deepEqual(r.get('a'), {x: 1000, y: H, width: 1000, height: 1000 - H});
+    assert.deepEqual(r.get('b'), r.get('a'));
+    assert.deepEqual(r.get('c'), {x: 2000, y: 0, width: 1000, height: 1000});
+});
+
+test('members of a tab group never swap', () => {
+    const l = tabbed();
+    const t = M.dropTarget(l, AREA, GAPS, {x: 500, y: 600}, 'a', MIN);
+    assert.equal(t.swap, undefined);
+    assert.equal(t.tab, true);
+    M.moveWindow(l, 'a', t, AREA, GAPS);
+    assert.deepEqual(l.regions[0].root, {tabs: ['c', 'a']});
+    assert.deepEqual(l.regions[1].root, {win: 'b'});
+});
+
+test('a window leaves its tab group by splitting the group', () => {
+    const l = tabbed();
+    // Its own group's middle and bar: no change.
+    assert.equal(M.dropTarget(l, AREA, GAPS, {x: 2000, y: 500}, 'b', MIN), null);
+    assert.equal(M.dropTarget(l, AREA, GAPS, {x: 1500, y: H / 2}, 'b', MIN), null);
+    const t = M.dropTarget(l, AREA, GAPS, {x: 2900, y: 500}, 'b', MIN);
+    assert.equal(t.side, 'right');
+    assert.equal(t.win, 'a');
+    assert.equal(t.fits, true);
+    // Judging the room didn't touch the layout.
+    assert.deepEqual(l.regions[1].root, {tabs: ['a', 'b']});
+    M.moveWindow(l, 'b', t, AREA, GAPS);
+    // One window left: a plain pane again.
+    assert.deepEqual(l.regions[1].root,
+        {dir: 'row', ratio: 0.5, a: {win: 'a'}, b: {win: 'b'}});
+});
+
+test('removing a tab keeps the group until one window is left', () => {
+    const l = tabbed();
+    l.regions[1].root.tabs.push('e');
+    M.removeWindow(l, 'a');
+    assert.deepEqual(l.regions[1].root, {tabs: ['b', 'e']});
+    M.removeWindow(l, 'e');
+    assert.deepEqual(l.regions[1].root, {win: 'b'});
+    assert.deepEqual(M.windowsOf(tabbed()), ['c', 'a', 'b', 'd']);
+});
+
+test('hidden tabs take no space but keep their tab; a fill hides the bars', () => {
+    const l = tabbed();
+    const hidden = new Set(['a']);
+    let out = M.computeLayout(l, AREA, GAPS, w => !hidden.has(w));
+    assert.equal(out.windows.has('a'), false);
+    assert.deepEqual(out.windows.get('b'), {x: 1000, y: H, width: 2000, height: 1000 - H});
+    assert.deepEqual(out.tabBars[0].wins, ['a', 'b']);
+    hidden.add('b');
+    out = M.computeLayout(l, AREA, GAPS, w => !hidden.has(w));
+    assert.deepEqual(out.tabBars, []);
+    M.toggleFill(l, 'a');
+    out = M.computeLayout(l, AREA, GAPS);
+    assert.deepEqual(out.windows.get('a'), {x: 1000, y: 0, width: 2000, height: 1000});
+    assert.deepEqual(out.tabBars, []);
+});
+
+test('new windows split a tab group as a whole', () => {
+    const l = tabbed();
+    assert.equal(M.insertAt(l, 'e', {x: 2900, y: 500}, AREA, GAPS, MIN), 1);
+    assert.deepEqual(l.regions[1].root,
+        {dir: 'row', ratio: 0.5, a: {tabs: ['a', 'b']}, b: {win: 'e'}});
+});
+
+test('a tab group needs room for its largest window plus the bar', () => {
+    const l = tabbed();
+    l.regions[1].root = {dir: 'column', ratio: 0.5, a: {tabs: ['a', 'b']}, b: {win: 'e'}};
+    M.resizeEdge(l, AREA, GAPS, 'a', 's', {x: 1000, y: H, width: 2000, height: 10}, MIN);
+    assert.deepEqual(M.computeLayout(l, AREA, GAPS, undefined, MIN).windows.get('a'),
+        {x: 1000, y: H, width: 2000, height: MIN});
+    // Calculator (900 tall) plus the bar doesn't fit half of 1000.
+    l.regions[0].root = {tabs: ['calc', 'c']};
+    const t = M.dropTarget(l, AREA, GAPS, {x: 500, y: 100}, 'e', MINS);
+    assert.equal(t.side, 'top');
+    assert.equal(t.fits, false);
+    // Nor does a tab group take a window that leaves no room for its bar.
+    l.regions[0].root = {win: 'c'};
+    const tall = w => ({width: 100, height: w === 'tall' ? 1000 - H + 1 : 100});
+    let u = M.dropTarget(l, AREA, GAPS, {x: 500, y: 400}, 'tall', tall);
+    assert.equal(u.tab, true);
+    assert.equal(u.fits, false);
+    u = M.dropTarget(l, AREA, GAPS, {x: 500, y: 400}, 'e', tall);
+    assert.equal(u.fits, true);
+});
+
+test('a tab group\'s top edge moves the split above its bar', () => {
+    const l = tabbed();
+    l.regions[1].root = {dir: 'column', ratio: 0.5, a: {win: 'e'}, b: {tabs: ['a', 'b']}};
+    // The window's top edge sits under the bar; drag it up by 100.
+    M.resizeEdge(l, AREA, GAPS, 'a', 'n',
+        {x: 1000, y: 400 + H, width: 2000, height: 600 - H}, MIN);
+    const r = rects(l);
+    assert.deepEqual(r.get('e'), {x: 1000, y: 0, width: 2000, height: 400});
+    assert.deepEqual(r.get('a'), {x: 1000, y: 400 + H, width: 2000, height: 600 - H});
+});
+
+test('a tab bar stands apart from its window by half the inner gap', () => {
+    const gaps = {outer: 0, region: 0, inner: 10};
+    const l = tabbed();
+    let out = M.computeLayout(l, AREA, gaps);
+    assert.deepEqual(out.tabBars[0].rect, {x: 1000, y: 0, width: 2000, height: H});
+    assert.deepEqual(out.windows.get('a'), {x: 1000, y: H + 5, width: 2000, height: 995 - H});
+    // Dragging the window's top edge moves the split above the bar and gap.
+    l.regions[1].root = {dir: 'column', ratio: 0.5, a: {win: 'e'}, b: {tabs: ['a', 'b']}};
+    M.resizeEdge(l, AREA, gaps, 'a', 'n',
+        {x: 1000, y: 405 + H + 5, width: 2000, height: 595 - H - 5}, MIN);
+    out = M.computeLayout(l, AREA, gaps);
+    assert.deepEqual(out.windows.get('e'), {x: 1000, y: 0, width: 2000, height: 395});
+    assert.deepEqual(out.tabBars[0].rect, {x: 1000, y: 405, width: 2000, height: H});
+    assert.deepEqual(out.windows.get('a'), {x: 1000, y: 405 + H + 5, width: 2000, height: 595 - H - 5});
 });

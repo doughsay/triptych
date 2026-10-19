@@ -2,6 +2,7 @@
 // belong in model.js, this file only tracks windows, listens to signals and
 // applies rects.
 
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
@@ -59,6 +60,7 @@ export class Tiler {
         this._overlay = null;
         this._labels = null; // size labels while a boundary is dragged
         this._pending = new Map(); // window actor -> first-frame handler id
+        this._bars = new Map(); // tab group -> {ws, actor, tabs: [{win, button, label}]}
     }
 
     enable() {
@@ -70,6 +72,11 @@ export class Tiler {
         this._connect(display, 'workareas-changed', () => this._queueAll());
         this._connect(Main.layoutManager, 'monitors-changed', () => this._queueAll());
         this._connect(global.workspace_manager, 'workspace-removed', () => this._pruneLayouts());
+        // Tab bars follow their windows' stacking, and give way to fullscreen.
+        this._connect(display, 'restacked', () => this._restackBars());
+        this._connect(display, 'in-fullscreen-changed', () => this._restackBars());
+        this._connect(global.workspace_manager, 'active-workspace-changed',
+            () => this._restackBars());
         this._connect(this._settings, 'changed::float-classes', () => this._resyncTracking());
 
         // "Float Window" / "Tile Window" in the window menu.
@@ -94,6 +101,9 @@ export class Tiler {
         this._injections = null;
         this._hideOverlay();
         this._dropConstraint();
+        for (const bar of this._bars.values())
+            bar.actor.destroy();
+        this._bars.clear();
         if (this._idleId)
             GLib.source_remove(this._idleId);
         for (const [obj, id] of this._signals)
@@ -208,6 +218,7 @@ export class Tiler {
     // A window that gets a FLOAT_TITLES title just after opening floats, back
     // at the size it opened with, centered where it was tiled but on screen.
     _onTitleChanged(win) {
+        this._updateTabTitle(win);
         const state = this._windows.get(win);
         if (GLib.get_monotonic_time() > state.titleUntil ||
             !Model.matchesTitleRule(win.get_wm_class(), win.get_title(), FLOAT_TITLES))
@@ -285,6 +296,7 @@ export class Tiler {
             if (!alive.has(ws)) {
                 this._layouts.delete(ws);
                 this._dirty.delete(ws);
+                this._syncBars(ws, []);
             }
         }
     }
@@ -467,11 +479,13 @@ export class Tiler {
         const area = layout && this._area(ws);
         if (!area)
             return;
-        const {windows} = Model.computeLayout(layout, area, GAPS, this._visible, this._minSize);
+        const {windows, tabBars} = Model.computeLayout(layout, area, GAPS, this._visible,
+            this._minSize);
         for (const [win, r] of windows) {
             if (win !== except)
                 this._place(win, r);
         }
+        this._syncBars(ws, tabBars);
     }
 
     _place(win, r) {
@@ -482,6 +496,100 @@ export class Tiler {
             this._unmaximize(win);
         win.get_compositor_private()?.remove_all_transitions();
         win.move_resize_frame(true, r.x, r.y, r.width, r.height);
+    }
+
+    // --- Tab bars ------------------------------------------------------------
+
+    // Makes the workspace's bars match `tabBars` from the layout: one per tab
+    // group, a tab per window in tab order. Clicking a tab activates its
+    // window; middle-clicking closes it.
+    _syncBars(ws, tabBars) {
+        const live = new Set();
+        for (const {group, wins, rect} of tabBars) {
+            live.add(group);
+            let bar = this._bars.get(group);
+            if (!bar) {
+                const actor = new St.BoxLayout({style_class: 'triptych-tabs', visible: false});
+                actor.layout_manager.homogeneous = true; // equal-width tabs
+                global.window_group.add_child(actor);
+                bar = {ws, actor, tabs: []};
+                this._bars.set(group, bar);
+            }
+            if (wins.length !== bar.tabs.length || wins.some((w, i) => w !== bar.tabs[i].win)) {
+                bar.actor.destroy_all_children();
+                bar.tabs = wins.map(win => this._tab(win));
+                for (const tab of bar.tabs)
+                    bar.actor.add_child(tab.button);
+            }
+            bar.actor.set_position(rect.x, rect.y);
+            bar.actor.set_size(rect.width, rect.height);
+        }
+        for (const [group, bar] of this._bars) {
+            if (bar.ws === ws && !live.has(group)) {
+                bar.actor.destroy();
+                this._bars.delete(group);
+            }
+        }
+        this._restackBars();
+    }
+
+    _tab(win) {
+        const app = Shell.WindowTracker.get_default().get_window_app(win);
+        const icon = app?.create_icon_texture(16) ??
+            new St.Icon({icon_name: 'application-x-executable-symbolic', icon_size: 16});
+        const label = new St.Label({text: win.get_title() ?? '', y_align: Clutter.ActorAlign.CENTER,
+            x_expand: true});
+        const content = new St.BoxLayout({style_class: 'triptych-tab-content', x_expand: true});
+        content.add_child(icon);
+        content.add_child(label);
+        const button = new St.Button({
+            style_class: 'triptych-tab', child: content, x_expand: true,
+            button_mask: St.ButtonMask.PRIMARY | St.ButtonMask.MIDDLE,
+        });
+        button.connect('clicked', (_b, clicked) => {
+            if (clicked === Clutter.BUTTON_MIDDLE)
+                win.delete(global.get_current_time());
+            else
+                win.activate(global.get_current_time());
+        });
+        return {win, button, label};
+    }
+
+    _updateTabTitle(win) {
+        for (const bar of this._bars.values()) {
+            for (const tab of bar.tabs) {
+                if (tab.win === win)
+                    tab.label.text = win.get_title() ?? '';
+            }
+        }
+    }
+
+    // Each bar sits just above the top window of its group, which is the one
+    // showing, and marks its tab active. Bars show only on the active workspace
+    // and never while something is fullscreen (R9): an actor over a fullscreen
+    // window would cover it and stop it from being unredirected. Mutter reorders
+    // window_group on every restack, so this runs on every restack.
+    _restackBars() {
+        const display = global.display;
+        const fullscreen = display.get_n_monitors() > 0 &&
+            display.get_monitor_in_fullscreen(display.get_primary_monitor());
+        const active = global.workspace_manager.get_active_workspace();
+        const group = global.window_group;
+        for (const bar of this._bars.values()) {
+            const shown = bar.tabs.map(t => t.win).filter(w => this._windows.has(w) && !w.minimized);
+            const top = display.sort_windows_by_stacking(shown).at(-1);
+            const actor = top?.get_compositor_private();
+            bar.actor.visible = bar.ws === active && !fullscreen && actor?.get_parent() === group;
+            if (!bar.actor.visible)
+                continue;
+            group.set_child_above_sibling(bar.actor, actor);
+            for (const {win, button} of bar.tabs) {
+                if (win === top)
+                    button.add_style_class_name('active');
+                else
+                    button.remove_style_class_name('active');
+            }
+        }
     }
 
     // --- Mouse: drag to move, drag edges to resize ----------------------------
@@ -645,9 +753,10 @@ export class Tiler {
             this._preview.hide(); // no change, or floating where it's dropped
             return;
         }
-        // Blue: split. Green: swap. Red: no room.
+        // Blue: split. Green: swap. Purple: tab. Red: no room.
         this._preview.style_class = !target.fits ? 'triptych-preview refused'
-            : target.swap ? 'triptych-preview swap' : 'triptych-preview';
+            : target.swap ? 'triptych-preview swap'
+                : target.tab ? 'triptych-preview tab' : 'triptych-preview';
         this._preview.set_position(target.rect.x, target.rect.y);
         this._preview.set_size(target.rect.width, target.rect.height);
         this._preview.show();

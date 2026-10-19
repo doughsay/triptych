@@ -1,12 +1,19 @@
 // Pure layout model. No GNOME imports: unit-tested with `node --test`.
 //
 // A layout belongs to one workspace. It is an ordered row of regions. Each region
-// holds a binary split tree of windows (or nothing). Windows are opaque keys
-// (Meta.Window in the shell, strings in tests).
+// holds a binary split tree of panes (or nothing). A pane holds one window, or
+// a tab group: windows that share the pane, one shown at a time, under a bar
+// of tabs. Windows are opaque keys (Meta.Window in the shell, strings in
+// tests).
 //
 //   Layout = { regions: Region[] }
 //   Region = { size: number, root: Node | null, fill: win | null, floating: bool }
-//   Node   = { win } | { dir: 'row' | 'column', ratio: number, a: Node, b: Node }
+//   Node   = Pane | { dir: 'row' | 'column', ratio: number, a: Node, b: Node }
+//   Pane   = { win } | { tabs: win[] }
+//
+// A tab group always has two or more windows; with one left it becomes a
+// plain { win } again. Which tab shows isn't part of the layout: every window
+// of a group gets the same rect, and the shell shows whichever is on top.
 //
 // A floating region holds no tree: windows in it float, and placement skips
 // it. Floating windows aren't in the layout at all.
@@ -16,7 +23,7 @@
 // `minSize` is either a number or a function win => { width, height } giving
 // a window's smallest frame size (win is null for an empty region).
 
-import {RESIZE_SNAP, SNAP_DISTANCE, SWAP_ZONE} from './config.js';
+import {RESIZE_SNAP, SNAP_DISTANCE, SWAP_ZONE, TAB_BAR_HEIGHT} from './config.js';
 
 export function createLayout(sizes) {
     return {
@@ -38,7 +45,14 @@ export function regionOrder(n) {
     return order;
 }
 
-const isLeaf = node => 'win' in node;
+const isLeaf = node => !('dir' in node); // a pane
+
+// Height a tab group's bar takes from its pane: the bar and the gap under it.
+// The bar stands apart from the window because a window's rounded corners are
+// up to the app and can't be matched. The gap is half the inner gap, so the
+// bar reads as belonging to its window rather than as a pane of its own.
+const barSpace = gap => TAB_BAR_HEIGHT + gap / 2;
+const winsOf = pane => pane.tabs ?? [pane.win];
 
 function* leaves(node) {
     if (!node)
@@ -53,19 +67,19 @@ function* leaves(node) {
 
 function anyVisible(node, visible) {
     for (const leaf of leaves(node)) {
-        if (visible(leaf.win))
+        if (winsOf(leaf).some(visible))
             return true;
     }
     return false;
 }
 
-// Path of nodes from the region root down to the window's leaf.
+// Path of nodes from the region root down to the window's pane.
 function pathTo(node, win, path = []) {
     if (!node)
         return null;
     path.push(node);
     if (isLeaf(node)) {
-        if (node.win === win)
+        if (winsOf(node).includes(win))
             return path;
     } else if (pathTo(node.a, win, path) || pathTo(node.b, win, path)) {
         return path;
@@ -84,7 +98,7 @@ export function findWindow(layout, win) {
 }
 
 export function windowsOf(layout) {
-    return layout.regions.flatMap(r => [...leaves(r.root)].map(l => l.win));
+    return layout.regions.flatMap(r => [...leaves(r.root)].flatMap(winsOf));
 }
 
 function replaceNode(region, path, replacement) {
@@ -148,18 +162,29 @@ function splitRect(r, dir, ratio, gap) {
     ];
 }
 
-// Lays out a tree into `out`. Subtrees with no visible windows collapse, so
-// their sibling takes the space. A split whose ratio would put a window under
-// its minimum is clamped for this layout only (the stored ratio is kept for
-// when there's room again). opts = { gap, visible, mins, nodeRects? };
-// `nodeRects` receives the rect of every split that actually divides space.
+// Lays out a tree into `out` (window -> rect). Subtrees with no visible
+// windows collapse, so their sibling takes the space. A split whose ratio
+// would put a window under its minimum is clamped for this layout only (the
+// stored ratio is kept for when there's room again). A tab group's bar takes
+// the top TAB_BAR_HEIGHT of its pane, with half a gap under it. opts = { gap, visible, mins, nodeRects?,
+// panes?, bars? }: `nodeRects` receives the rect of every split that actually
+// divides space, `panes` the rect of every shown pane, and `bars` gets
+// { group, rect } for every shown tab bar.
 function tile(node, r, opts, out) {
     if (!node)
         return;
     const {gap, visible, mins} = opts;
     if (isLeaf(node)) {
-        if (visible(node.win))
-            out.set(node.win, r);
+        const shown = winsOf(node).filter(visible);
+        if (shown.length === 0)
+            return;
+        opts.panes?.set(node, r);
+        if (node.tabs) {
+            opts.bars?.push({group: node, rect: {...r, height: TAB_BAR_HEIGHT}});
+            r = {...r, y: r.y + barSpace(gap), height: r.height - barSpace(gap)};
+        }
+        for (const win of shown)
+            out.set(win, r);
         return;
     }
     const va = anyVisible(node.a, visible);
@@ -197,29 +222,38 @@ function round(r) {
 
 const always = () => true;
 
+// A filled region shows no tab bars: the filled window covers them.
 function computeF(layout, area, gaps, visible, minSize, nodeRects) {
     const regions = regionRectsF(layout, area, gaps);
     const windows = new Map();
-    const opts = {gap: gaps.inner, visible, mins: minOf(minSize), nodeRects};
+    const bars = [];
     layout.regions.forEach((region, i) => {
+        const opts = {gap: gaps.inner, visible, mins: minOf(minSize), nodeRects, bars: []};
         tile(region.root, regions[i], opts, windows);
         if (region.fill && windows.has(region.fill))
             windows.set(region.fill, regions[i]);
+        else
+            bars.push(...opts.bars);
     });
-    return {regions, windows};
+    return {regions, windows, bars};
 }
 
-// Final pixel rects: { regions: Rect[], windows: Map<win, Rect> }.
+// Final pixel rects: { regions: Rect[], windows: Map<win, Rect>, tabBars }.
 // Windows for which `visible(win)` is false get no rect and take no space.
+// tabBars = [{ group, wins, rect }]: each shown tab group (an opaque key that
+// stays the same while the group lasts), its windows in tab order (hidden ones
+// too), and its bar.
 export function computeLayout(layout, area, gaps, visible = always, minSize = 0) {
-    const {regions, windows} = computeF(layout, area, gaps, visible, minSize);
+    const {regions, windows, bars} = computeF(layout, area, gaps, visible, minSize);
     for (const [win, r] of windows)
         windows.set(win, round(r));
-    return {regions: regions.map(round), windows};
+    const tabBars = bars.map(({group, rect}) => ({group, wins: [...group.tabs], rect: round(rect)}));
+    return {regions: regions.map(round), windows, tabBars};
 }
 
 // --- Mutations ----------------------------------------------------------
 
+// Splits the pane holding `leafWin` (a tab group splits as a whole).
 function splitLeaf(region, leafWin, win, dir, newFirst) {
     const path = pathTo(region.root, leafWin);
     const leaf = path[path.length - 1];
@@ -237,14 +271,14 @@ const splitDir = r => r.height > r.width ? 'column' : 'row';
 
 const NO_GAPS = {outer: 0, region: 0, inner: 0};
 
-// Pane rects (unrounded) of the given regions, in region then tree order.
-// Fill is ignored.
-function paneRects(layout, area, gaps, regionIndexes, minSize) {
+// Pane rects (unrounded) of the given regions, in region then tree order:
+// Map<pane, rect>. Fill is ignored.
+function paneRects(layout, area, gaps, regionIndexes, minSize, visible = always) {
     const regions = regionRectsF(layout, area, gaps);
     const panes = new Map();
-    const opts = {gap: gaps.inner, visible: always, mins: minOf(minSize)};
+    const opts = {gap: gaps.inner, visible, mins: minOf(minSize), panes};
     for (const i of regionIndexes)
-        tile(layout.regions[i].root, regions[i], opts, panes);
+        tile(layout.regions[i].root, regions[i], opts, new Map());
     return panes;
 }
 
@@ -260,11 +294,28 @@ function fitsIn(r, win, mins) {
     return r.width >= m.width && r.height >= m.height;
 }
 
-// Whether pane `r` (holding `leafWin`) can split in half along `dir` with
-// both `leafWin` and `win` at least their minimum size.
-function canSplit(r, dir, gap, leafWin, win, mins) {
+// Smallest size of a pane: a tab group needs room for its largest window
+// (hidden ones too) plus the bar.
+function paneMin(pane, mins, gap) {
+    if (!pane.tabs)
+        return mins(pane.win);
+    const all = pane.tabs.map(mins);
+    return {
+        width: Math.max(...all.map(m => m.width)),
+        height: Math.max(...all.map(m => m.height)) + barSpace(gap),
+    };
+}
+
+function paneFits(r, pane, mins, gap) {
+    const m = paneMin(pane, mins, gap);
+    return r.width >= m.width && r.height >= m.height;
+}
+
+// Whether pane `pane` at rect `r` can split in half along `dir` with both it
+// and `win` at least their minimum size.
+function canSplit(r, dir, gap, pane, win, mins) {
     const [half] = splitRect(r, dir, 0.5, gap);
-    return fitsIn(half, leafWin, mins) && fitsIn(half, win, mins);
+    return paneFits(half, pane, mins, gap) && fitsIn(half, win, mins);
 }
 
 // Splits the largest pane in `regionIndexes` that can take `win` above both
@@ -278,16 +329,16 @@ function splitLargest(layout, win, area, gaps, regionIndexes, minSize) {
     const real = paneRects(layout, area, gaps, regionIndexes, minSize);
     const bare = paneRects(layout, area, NO_GAPS, regionIndexes, 0);
     let best = null;
-    for (const [leafWin, r] of bare) {
+    for (const [pane, r] of bare) {
         const size = r.width * r.height;
         // + 0.5 so float noise can't break a tie.
         if (best && size <= best.size + 0.5)
             continue;
         const preferred = splitDir(r);
         const dir = [preferred, preferred === 'row' ? 'column' : 'row'].find(d =>
-            canSplit(real.get(leafWin), d, gaps.inner, leafWin, win, mins));
+            canSplit(real.get(pane), d, gaps.inner, pane, win, mins));
         if (dir)
-            best = {leafWin, dir, size};
+            best = {leafWin: winsOf(pane)[0], dir, size};
     }
     if (!best)
         return null;
@@ -321,27 +372,26 @@ export function insertAt(layout, win, point, area, gaps, minSize, visible = alwa
     if (!contains(area, point) || layout.regions[i].floating)
         return insertWindow(layout, win, area, gaps, minSize);
     const mins = minOf(minSize);
-    const panes = new Map();
-    tile(layout.regions[i].root, regions[i], {gap: gaps.inner, visible, mins}, panes);
+    const panes = paneRects(layout, area, gaps, [i], minSize, visible);
     // The pane under the point, or failing that the nearest one.
     let best = null, bestDist = Infinity;
-    for (const [w, r] of panes) {
+    for (const [pane, r] of panes) {
         const d = distance(r, point);
         if (d < bestDist) {
-            best = {leafWin: w, r};
+            best = {pane, r};
             bestDist = d;
         }
     }
     if (best) {
-        const {leafWin, r} = best;
+        const {pane, r} = best;
         const preferred = splitDir(r);
         const dir = [preferred, preferred === 'row' ? 'column' : 'row'].find(d =>
-            canSplit(r, d, gaps.inner, leafWin, win, mins));
+            canSplit(r, d, gaps.inner, pane, win, mins));
         if (dir) {
             const newFirst = dir === 'row'
                 ? point.x < r.x + r.width / 2
                 : point.y < r.y + r.height / 2;
-            splitLeaf(layout.regions[i], leafWin, win, dir, newFirst);
+            splitLeaf(layout.regions[i], winsOf(pane)[0], win, dir, newFirst);
             return i;
         }
     }
@@ -368,7 +418,7 @@ export function insertInto(layout, win, i, area, gaps, minSize) {
 // region starts empty (the caller re-tiles whichever floating windows it wants).
 export function setRegionFloating(layout, i, floating) {
     const region = layout.regions[i];
-    const wins = [...leaves(region.root)].map(l => l.win);
+    const wins = [...leaves(region.root)].flatMap(winsOf);
     region.floating = floating;
     if (floating) {
         region.root = null;
@@ -420,13 +470,21 @@ function regionIndexAt(regions, gaps, point) {
         i === regions.length - 1 || point.x < r.x + r.width + gaps.region / 2);
 }
 
+// A window leaving a tab group of two leaves a plain pane, changed in place.
 export function removeWindow(layout, win) {
     const found = findWindow(layout, win);
     if (!found)
         return false;
     const region = layout.regions[found.region];
     const {path} = found;
-    if (path.length === 1) {
+    const pane = path.at(-1);
+    if (pane.tabs) {
+        pane.tabs = pane.tabs.filter(w => w !== win);
+        if (pane.tabs.length === 1) {
+            pane.win = pane.tabs[0];
+            delete pane.tabs;
+        }
+    } else if (path.length === 1) {
         region.root = null;
     } else {
         const parent = path[path.length - 2];
@@ -474,7 +532,10 @@ export function moveWindow(layout, win, target, area, gaps) {
     if (target.float)
         return true;
     const region = layout.regions[target.region];
-    if (target.win && pathTo(region.root, target.win)) {
+    const path = target.win && pathTo(region.root, target.win);
+    if (path && target.tab) {
+        addTab(path.at(-1), win);
+    } else if (path) {
         const dir = target.side === 'left' || target.side === 'right' ? 'row' : 'column';
         const newFirst = target.side === 'left' || target.side === 'top';
         splitLeaf(region, target.win, win, dir, newFirst);
@@ -487,7 +548,17 @@ export function moveWindow(layout, win, target, area, gaps) {
     return true;
 }
 
-// Exchanges the slots of two tiled windows. A fill on either ends.
+// Adds `win` as the last tab of `pane`, turning a plain pane into a group.
+function addTab(pane, win) {
+    if (!pane.tabs) {
+        pane.tabs = [pane.win];
+        delete pane.win;
+    }
+    pane.tabs.push(win);
+}
+
+// Exchanges the slots of two tiled windows in plain panes. A fill on either
+// ends.
 function swapWindows(layout, a, b) {
     const fa = findWindow(layout, a), fb = findWindow(layout, b);
     if (!fa || !fb)
@@ -505,10 +576,14 @@ function swapWindows(layout, a, b) {
 // --- Mouse helpers ------------------------------------------------------
 
 // Where a dragged window would land if dropped at `point`. Returns
-// { region, win?, side?, rect, fits, float?, swap? } (rect = preview), or null
-// for "no change". `fits` is false when a window would end up under its
-// minimum size. In a floating region the target is { float: true } with no
-// rect. Dropping a tiled window in the middle of another swaps the two.
+// { region, win?, side?, rect, fits, float?, swap?, tab? } (rect = preview),
+// or null for "no change". `fits` is false when a window would end up under
+// its minimum size. In a floating region the target is { float: true } with
+// no rect. Over a pane, the middle (SWAP_ZONE) and a tab bar add the window
+// as a tab, except that the lower half of the middle of a plain pane swaps
+// two tiled windows that aren't in tab groups. Elsewhere the pane splits on
+// the nearest side. A window can be dragged out of its own tab group by
+// splitting the group.
 export function dropTarget(layout, area, gaps, point, dragged, minSize, visible = always) {
     const mins = minOf(minSize);
     const {regions, windows} = computeLayout(layout, area, gaps, visible, minSize);
@@ -516,8 +591,11 @@ export function dropTarget(layout, area, gaps, point, dragged, minSize, visible 
     const region = layout.regions[ri];
     if (region.floating)
         return {region: ri, rect: null, fits: true, float: true};
-    const others = [...windows].filter(([w]) => w !== dragged &&
-        findWindow(layout, w)?.region === ri);
+    const ownPane = findWindow(layout, dragged)?.path.at(-1);
+    // Panes of the region, but not the dragged window's own plain pane.
+    const others = [...paneRects(layout, area, gaps, [ri], minSize, visible)]
+        .filter(([pane]) => pane !== ownPane || pane.tabs)
+        .map(([pane, r]) => [pane, round(r)]);
 
     if (others.length === 0) {
         if (findWindow(layout, dragged)?.region === ri && !region.root?.dir)
@@ -525,45 +603,65 @@ export function dropTarget(layout, area, gaps, point, dragged, minSize, visible 
         return {region: ri, rect: regions[ri], fits: fitsIn(regions[ri], dragged, mins)};
     }
 
-    const own = windows.get(dragged);
+    const own = ownPane && !ownPane.tabs ? windows.get(dragged) : null;
     if (own && contains(own, point))
         return null;
 
-    // The window under the pointer, or failing that the nearest one.
+    // The pane under the pointer, or failing that the nearest one.
     let best = null, bestDist = Infinity;
-    for (const [w, r] of others) {
+    for (const [pane, r] of others) {
         const d = distance(r, point);
         if (d < bestDist) {
-            best = [w, r];
+            best = [pane, r];
             bestDist = d;
         }
     }
-    const [win, r] = best;
+    const [pane, r] = best;
+    const win = winsOf(pane).find(w => w !== dragged);
+    const onBar = pane.tabs && contains({...r, height: TAB_BAR_HEIGHT}, point);
     const dx = (point.x - (r.x + r.width / 2)) / r.width;
     const dy = (point.y - (r.y + r.height / 2)) / r.height;
-    if (own && Math.abs(dx) < SWAP_ZONE && Math.abs(dy) < SWAP_ZONE) {
+    const middle = Math.abs(dx) < SWAP_ZONE && Math.abs(dy) < SWAP_ZONE;
+    if ((onBar || middle) && pane === ownPane)
+        return null;
+    if (middle && own && !pane.tabs && dy >= 0) {
         const fits = fitsIn(r, dragged, mins) && fitsIn(own, win, mins);
         return {region: ri, win, side: 'center', rect: r, fits, swap: true};
+    }
+
+    // Room is judged after the dragged window leaves its slot, which can make
+    // the target bigger (moving within a region). The preview stays as is.
+    let after = r, afterPane = pane;
+    if (ownPane) {
+        const without = cloneLayout(layout);
+        removeWindow(without, dragged);
+        const found = [...paneRects(without, area, gaps, [ri], minSize, visible)]
+            .find(([p]) => winsOf(p).includes(win));
+        if (!found)
+            return null; // the rest of its own group is hidden
+        [afterPane, after] = found;
+    }
+    if (onBar || middle) {
+        const fits = paneFits(after, {tabs: [...winsOf(afterPane), dragged]}, mins, gaps.inner);
+        return {region: ri, win, side: 'center', rect: r, fits, tab: true};
     }
     const side = Math.abs(dx) > Math.abs(dy)
         ? (dx < 0 ? 'left' : 'right')
         : (dy < 0 ? 'top' : 'bottom');
     const dir = side === 'left' || side === 'right' ? 'row' : 'column';
-    // Room is judged after the dragged window leaves its slot, which can make
-    // the target bigger (moving within a region). The preview stays as is.
-    let after = r;
-    if (own) {
-        const without = cloneLayout(layout);
-        removeWindow(without, dragged);
-        after = computeLayout(without, area, gaps, visible, minSize).windows.get(win);
-    }
-    const fits = canSplit(after, dir, gaps.inner, win, dragged, mins);
+    const fits = canSplit(after, dir, gaps.inner, afterPane, dragged, mins);
     return {region: ri, win, side, rect: half(r, side), fits};
 }
 
 // Copies the trees (windows stay the same objects).
 function cloneLayout(layout) {
-    const cloneNode = n => !n || isLeaf(n) ? n && {...n} : {...n, a: cloneNode(n.a), b: cloneNode(n.b)};
+    const cloneNode = n => {
+        if (!n)
+            return n;
+        if (isLeaf(n))
+            return n.tabs ? {tabs: [...n.tabs]} : {...n};
+        return {...n, a: cloneNode(n.a), b: cloneNode(n.b)};
+    };
     return {regions: layout.regions.map(r => ({...r, root: cloneNode(r.root)}))};
 }
 
@@ -628,7 +726,10 @@ export function resizeEdge(layout, area, gaps, win, edge, frame, minSize, visibl
     if (boundary.node) {
         const {node, rect} = boundary;
         const axis = node.dir;
-        const pos = edgePos(frame, edge, gaps.inner);
+        // A tab group's top edge is its bar's, above the window.
+        const bar = edge === 'n' && findWindow(layout, win).path.at(-1).tabs
+            ? barSpace(gaps.inner) : 0;
+        const pos = edgePos(frame, edge, gaps.inner) - bar;
         const [start, len] = axis === 'row' ? [rect.x, rect.width] : [rect.y, rect.height];
         const lo = start + minExtent(node.a, axis, gaps.inner, mins, visible) + gaps.inner / 2;
         const hi = start + len - minExtent(node.b, axis, gaps.inner, mins, visible) -
@@ -717,7 +818,7 @@ export function grabFrame(start, pointerStart, pointer, edges) {
 // it at least its minimum size. Hidden subtrees collapse and need nothing.
 function minExtent(node, axis, gap, mins, visible) {
     if (isLeaf(node))
-        return along(mins(node.win), axis);
+        return along(paneMin(node, mins, gap), axis);
     const va = anyVisible(node.a, visible);
     const vb = anyVisible(node.b, visible);
     if (!va || !vb)

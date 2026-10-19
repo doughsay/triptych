@@ -23,6 +23,41 @@
   border-color: rgba(46, 194, 126, 0.8);
 }
 
+/* Dropping here adds the window as a tab. */
+.triptych-preview.tab {
+  background-color: rgba(192, 97, 203, 0.3);
+  border-color: rgba(192, 97, 203, 0.8);
+}
+
+/* A tab group's bar: one tab per window, the showing one lighter. Neutral
+   opaque greys only, so it reads as window chrome over any wallpaper. It sits half a gap above its window and
+   rounds all its corners, because windows' own corners vary by app. */
+.triptych-tabs {
+  spacing: 4px;
+}
+
+.triptych-tab {
+  background-color: rgb(30, 30, 30);
+  color: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 10pt;
+}
+
+.triptych-tab:hover {
+  background-color: rgb(42, 42, 42);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.triptych-tab.active {
+  background-color: rgb(60, 60, 60);
+  color: white;
+}
+
+.triptych-tab-content {
+  spacing: 8px;
+}
+
 /* Region or split sizes while a boundary is dragged. */
 .triptych-size {
   background-color: rgba(0, 0, 0, 0.75);

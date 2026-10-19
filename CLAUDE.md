@@ -21,9 +21,9 @@ or KDE.
   - 32:9 super-ultrawide, 7680x2160 at 125% fractional scaling (6144x1728 logical).
   - Fullscreen HDR games must keep working, and must never be tiled (R9).
 
-## Status (2026-10-16)
+## Status (2026-10-19)
 
-- 52 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
+- 63 unit tests pass. Nested-session checks 1–6 pass, and workspaces work. Running in the real
   session since 2026-10-09: fullscreen HDR games stay untouched.
 - The GitHub repo is `doughsay/triptych`. The extension ID `triptych@doughsay.github.io` is final.
 - v1 feature set is done and verified in nested (2026-10-09): floating regions (Quick Settings
@@ -42,6 +42,13 @@ or KDE.
 - 2026-10-16: new windows open at the pointer, splitting the pane under it on the pointer's side
   (R10), including launches from the overview (no special handling). Largest-pane placement is
   the fallback. Verified in nested; the real session picks it up at the next login.
+- 2026-10-19: tab groups per pane (R4, R12, Q4 in the decisions log): drop on the upper half of
+  a window's middle or on a group's bar to add a tab (purple preview), lower half still swaps.
+  The bar is `St` widgets in `window_group`, restacked above the group's top window on
+  `restacked`. Verified in nested: making a group, tab click, drop on the bar, splitting a
+  window out, middle-click close, hidden while fullscreen and on other workspaces, and resizing
+  a group from its window's top edge (the bar sits half a gap above the window). The real session
+  picks it up at the next login.
 - Dynamic workspaces are untested, and shift the saved workspace numbers.
 - `make nested` (via `make install`) symlinks the extension into
   `~/.local/share/gnome-shell/extensions/` and compiles the schema, so the real session shares
@@ -116,6 +123,11 @@ or KDE.
     For GApplication apps (Calculator, Nautilus, Console) also set `DBUS_SESSION_BUS_ADDRESS` to
     the nested bus (from the nested `gnome-shell`'s `/proc/<pid>/environ`), or they open in the
     real session. They still read the real session's dconf.
+- **Don't put JS properties on GObjects whose names clash with GObject properties.** Setting
+  `button.label = someStLabel` on an `St.Button` (which has a string `label` property) aborted
+  gnome-shell with "terminated with uncatchable exception" (almost certainly the cause: moving
+  that data into plain objects fixed it). Keep per-widget data in plain JS objects (`tiler.js`
+  keeps `{win, button, label}` per tab).
 - **No shell modal dialogs from scripts.** Don't trigger GNOME Shell modal dialogs (e.g. the
   extension install prompt) from scripts or tools: an unanswered one can stay on top of the lock
   screen. Install extensions from files instead.
